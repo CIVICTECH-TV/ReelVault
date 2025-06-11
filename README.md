@@ -34,7 +34,15 @@ ReelVault は、映像制作者が制作済みの映像プロジェクト・素�
 ### 🖥️ 使いやすいデスクトップアプリ
 - **Tauri**ベースのネイティブデスクトップアプリケーション
 - **React + TypeScript**による直感的なユーザーインターフェース
-- システムトレイ常駐でバックグラウンド処理をサポート
+- **3画面ナビゲーション**: APIテスト・AWS認証・設定管理
+- **macOS Keychain統合**: セキュアな認証情報保存
+- **リアルタイム検証**: AWS接続・S3アクセス権の即座確認
+
+### 🔐 セキュリティ機能
+- **暗号化保存**: Ring暗号化ライブラリによる認証情報保護
+- **Keychain統合**: macOSシステム標準のセキュア保存
+- **実認証**: AWS STS `get_caller_identity`による確実な接続確認
+- **権限検証**: S3バケットアクセス権の事前チェック
 
 ## 🛠 技術スタック
 
@@ -46,7 +54,9 @@ ReelVault は、映像制作者が制作済みの映像プロジェクト・素�
 
 ### バックエンド
 - **Language**: Rust
-- **HTTP Client**: AWS SDK for Rust
+- **AWS SDK**: AWS SDK for Rust (S3, STS, Credentials)
+- **Security**: macOS Keychain integration (keyring)
+- **Encryption**: Ring cryptography library
 - **Storage**: AWS S3 + Deep Archive
 - **Infrastructure**: AWS CloudFormation
 
@@ -113,39 +123,51 @@ cargo tauri dev
 ```
 ReelVault/
 ├── src/                     # React フロントエンド
-│   ├── components/          # Reactコンポーネント
+│   ├── components/          # Reactコンポーネント（AWS認証・設定UI含む）
 │   ├── pages/              # ページコンポーネント
 │   ├── hooks/              # カスタムフック
-│   └── types/              # TypeScript型定義
+│   └── types/              # TypeScript型定義（28個API対応）
 ├── src-tauri/              # Tauri バックエンド (Rust)
 │   ├── src/
-│   │   ├── commands/       # Tauriコマンド
-│   │   ├── aws/           # AWS操作モジュール
-│   │   └── config/        # 設定管理
-│   └── Cargo.toml
+│   │   ├── commands/       # Tauriコマンド（28個API実装済み）
+│   │   │   ├── aws_auth.rs    # AWS認証・Keychain連携
+│   │   │   ├── config.rs      # 設定管理・JSON永続化
+│   │   │   ├── file_ops.rs    # ファイル操作
+│   │   │   ├── aws_ops.rs     # AWS S3操作
+│   │   │   └── state_mgmt.rs  # 状態管理
+│   │   └── main.rs         # メインモジュール
+│   └── Cargo.toml          # Rust依存関係（AWS SDK・keyring）
 ├── infrastructure/         # AWS CloudFormation
 │   ├── s3-buckets.yaml    # S3バケット設定
 │   └── iam-roles.yaml     # IAMロール設定
-└── docs/                   # ドキュメント
+├── docs/                   # ドキュメント
+│   └── api/               # API仕様書
+└── scripts/               # 自動化スクリプト
 ```
 
 ## 📊 開発状況
 
-### Phase 1: インフラストラクチャ基盤 (進行中)
+### Phase 1: インフラストラクチャ基盤 ✅ **完了**
 
 - ✅ AWS CloudFormation テンプレート作成
 - ✅ Tauri + React + TypeScript基盤構築
-- ⏳ Tauri Command API実装 (Issue #33)
-- ⏳ AWS認証・設定管理機能 (Issue #9)
-- ⏳ 設定ファイル管理 (Issue #12)
+- ✅ Tauri Command API実装（28個のAPI） (Issue #33)
+- ✅ AWS認証・設定管理機能（macOS Keychain統合） (Issue #9)
+- ✅ 設定ファイル管理（JSON永続化・バックアップ機能） (Issue #12)
+- ✅ Epic1完全実装（3画面UIナビゲーション対応）
 
-**進捗**: 3/6 完了 (50%)
+**進捗**: 6/6 完了 (**100%** ✅)
 
-### 今後の予定
+### 🚀 Phase 2: ファイル処理エンジン (次フェーズ)
 
-- **Phase 2**: ファイル処理エンジン
-- **Phase 3**: ユーザーインターフェース
-- **Phase 4**: 品質・運用基盤
+- **ファイル管理システム**: 高速スキャン・重複検出・メタデータ抽出
+- **アップロードエンジン**: マルチパート・バックグラウンド・進捗監視
+- **復元システム**: Deep Archive復元・自動ダウンロード・整合性検証
+
+### 📅 今後の予定
+
+- **Phase 3**: ユーザーインターフェース（直感的UI・UX最適化）
+- **Phase 4**: 品質・運用基盤（テスト・CI/CD・監視）
 
 詳細は [GitHub Projects](https://github.com/CIVICTECH-TV/ReelVault/projects) をご覧ください。
 
@@ -204,9 +226,10 @@ MIT License - 詳細は [LICENSE](LICENSE) ファイルをご覧ください。
 
 ## 🏷 ロードマップ
 
-- [ ] **v0.1**: 基本的なアップロード・復元機能
-- [ ] **v0.2**: システムトレイ機能
-- [ ] **v0.3**: バックグラウンドアップロード
+- [x] **v0.1**: インフラ基盤・AWS認証・設定管理 ✅ **完了**
+- [ ] **v0.2**: ファイル処理エンジン・アップロード機能
+- [ ] **v0.3**: UI/UX最適化・システムトレイ機能
+- [ ] **v0.4**: バックグラウンドアップロード・進捗監視
 - [ ] **v1.0**: 安定版リリース
 - [ ] **v1.1**: 編集ソフト連携（Premiere Pro / DaVinci Resolve）
 - [ ] **v2.0**: チーム機能・複数ユーザー対応
