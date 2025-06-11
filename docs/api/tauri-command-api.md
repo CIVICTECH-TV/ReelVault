@@ -162,7 +162,7 @@ AwsAuthResult  // 認証結果とユーザー情報
 const result = await TauriCommands.authenticateAws({
   access_key_id: "AKIA...",
   secret_access_key: "...",
-  region: "ap-northeast-1",
+  region: "ap-northeast-1", // Default to Tokyo region
   session_token: null
 });
 ```

@@ -85,7 +85,7 @@ impl Default for UserPreferences {
 impl Default for AwsSettings {
     fn default() -> Self {
         AwsSettings {
-            default_region: "ap-northeast-1".to_string(),
+            default_region: "ap-northeast-1".to_string(), // Default to Tokyo region
             timeout_seconds: 300,
             max_retries: 3,
             profile_name: None,

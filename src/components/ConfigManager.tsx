@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { TauriCommands, AppConfig, ConfigValidationResult } from '../types/tauri-commands';
+import { AWS_REGIONS } from '../constants/aws-regions';
 import './ConfigManager.css';
 
 interface ConfigManagerProps {
   onConfigChange?: (config: AppConfig) => void;
+  onClose?: () => void;
 }
 
-export const ConfigManager: React.FC<ConfigManagerProps> = ({ onConfigChange }) => {
+export const ConfigManager: React.FC<ConfigManagerProps> = ({ onConfigChange, onClose }) => {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -152,6 +154,9 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({ onConfigChange }) 
       <div className="config-header">
         <h2>⚙️ アプリケーション設定</h2>
         <div className="config-actions">
+          <button onClick={onClose} className="btn-secondary">
+            ⬅️ 戻る
+          </button>
           <button onClick={validateConfig} className="btn-secondary">
             🔍 検証
           </button>
@@ -238,25 +243,25 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({ onConfigChange }) 
             <h3>アプリケーション設定</h3>
             
             <div className="config-group">
-              <label>
+              <div className="checkbox-wrapper">
                 <input
                   type="checkbox"
                   checked={config.app_settings.auto_save}
                   onChange={(e) => updateConfigValue('app_settings.auto_save', e.target.checked)}
                 />
-                自動保存を有効にする
-              </label>
+                <span>自動保存を有効にする</span>
+              </div>
             </div>
 
             <div className="config-group">
-              <label>
+              <div className="checkbox-wrapper">
                 <input
                   type="checkbox"
                   checked={config.app_settings.backup_enabled}
                   onChange={(e) => updateConfigValue('app_settings.backup_enabled', e.target.checked)}
                 />
-                バックアップを有効にする
-              </label>
+                <span>バックアップを有効にする</span>
+              </div>
             </div>
 
             <div className="config-group">
@@ -327,25 +332,25 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({ onConfigChange }) 
             </div>
 
             <div className="config-group">
-              <label>
+              <div className="checkbox-wrapper">
                 <input
                   type="checkbox"
                   checked={config.user_preferences.compression_enabled}
                   onChange={(e) => updateConfigValue('user_preferences.compression_enabled', e.target.checked)}
                 />
-                圧縮を有効にする
-              </label>
+                <span>圧縮を有効にする</span>
+              </div>
             </div>
 
             <div className="config-group">
-              <label>
+              <div className="checkbox-wrapper">
                 <input
                   type="checkbox"
                   checked={config.user_preferences.notification_enabled}
                   onChange={(e) => updateConfigValue('user_preferences.notification_enabled', e.target.checked)}
                 />
-                通知を有効にする
-              </label>
+                <span>通知を有効にする</span>
+              </div>
             </div>
 
             <div className="config-group">
@@ -377,12 +382,11 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({ onConfigChange }) 
                 value={config.aws_settings.default_region}
                 onChange={(e) => updateConfigValue('aws_settings.default_region', e.target.value)}
               >
-                <option value="us-east-1">US East (N. Virginia)</option>
-                <option value="us-west-2">US West (Oregon)</option>
-                <option value="ap-northeast-1">Asia Pacific (Tokyo)</option>
-                <option value="ap-northeast-2">Asia Pacific (Seoul)</option>
-                <option value="eu-west-1">Europe (Ireland)</option>
-                <option value="eu-central-1">Europe (Frankfurt)</option>
+                {AWS_REGIONS.map(region => (
+                  <option key={region.code} value={region.code}>
+                    {region.name}
+                  </option>
+                ))}
               </select>
             </div>
 

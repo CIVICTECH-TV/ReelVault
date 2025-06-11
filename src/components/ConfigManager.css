@@ -238,16 +238,24 @@
   box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
 }
 
-.config-group input[type="checkbox"] {
-  margin-right: 8px;
-  transform: scale(1.2);
-  accent-color: #4CAF50;
-}
-
-.config-group label:has(input[type="checkbox"]) {
+/* チェックボックス専用のスタイル */
+.config-group .checkbox-wrapper {
   display: flex;
   align-items: center;
   cursor: pointer;
+  margin-bottom: 16px;
+}
+
+.config-group .checkbox-wrapper input[type="checkbox"] {
+  margin-right: 8px;
+  margin-left: 0;
+  transform: scale(1.1);
+  accent-color: #4CAF50;
+}
+
+.config-group .checkbox-wrapper span {
+  color: #e0e0e0;
+  font-weight: 500;
 }
 
 .recent-files {

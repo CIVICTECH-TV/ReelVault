@@ -186,104 +186,97 @@ export interface StateUpdate {
 
 // ===== Tauri Command API関数の型定義 =====
 
-declare global {
-  interface Window {
-    __TAURI__: {
-      core: {
-        invoke: <T>(command: string, args?: any) => Promise<T>;
-      };
-    };
-  }
-}
+import { invoke } from '@tauri-apps/api/core';
 
 // API関数のラッパー
 export const TauriCommands = {
   // ファイル操作API
   listFiles: (directory: string): Promise<FileInfo[]> =>
-    window.__TAURI__.core.invoke('list_files', { directory }),
+    invoke('list_files', { directory }),
   
   getFileInfo: (filePath: string): Promise<FileInfo> =>
-    window.__TAURI__.core.invoke('get_file_info', { filePath }),
+    invoke('get_file_info', { filePath }),
   
   watchDirectory: (config: WatchConfig): Promise<string> =>
-    window.__TAURI__.core.invoke('watch_directory', { config }),
+    invoke('watch_directory', { config }),
 
   // AWS操作API
   testAwsConnection: (config: AwsConfig): Promise<ConnectionTestResult> =>
-    window.__TAURI__.core.invoke('test_aws_connection', { config }),
+    invoke('test_aws_connection', { config }),
   
   uploadFile: (filePath: string, s3Key: string, config: AwsConfig): Promise<string> =>
-    window.__TAURI__.core.invoke('upload_file', { filePath, s3Key, config }),
+    invoke('upload_file', { filePath, s3Key, config }),
   
   listS3Objects: (config: AwsConfig, prefix?: string): Promise<S3Object[]> =>
-    window.__TAURI__.core.invoke('list_s3_objects', { config, prefix }),
+    invoke('list_s3_objects', { config, prefix }),
   
   restoreFile: (s3Key: string, config: AwsConfig, tier: string): Promise<RestoreInfo> =>
-    window.__TAURI__.core.invoke('restore_file', { s3Key, config, tier }),
+    invoke('restore_file', { s3Key, config, tier }),
 
   // AWS認証API
   authenticateAws: (credentials: AwsCredentials): Promise<AwsAuthResult> =>
-    window.__TAURI__.core.invoke('authenticate_aws', { credentials }),
+    invoke('authenticate_aws', { credentials }),
   
   testS3BucketAccess: (credentials: AwsCredentials, bucketName: string): Promise<PermissionCheck> =>
-    window.__TAURI__.core.invoke('test_s3_bucket_access', { credentials, bucketName }),
+    invoke('test_s3_bucket_access', { credentials, bucketName }),
   
   saveAwsCredentialsSecure: (credentials: AwsCredentials, profileName: string): Promise<string> =>
-    window.__TAURI__.core.invoke('save_aws_credentials_secure', { credentials, profileName }),
+    invoke('save_aws_credentials_secure', { credentials, profileName }),
   
   loadAwsCredentialsSecure: (profileName: string): Promise<AwsCredentials> =>
-    window.__TAURI__.core.invoke('load_aws_credentials_secure', { profileName }),
+    invoke('load_aws_credentials_secure', { profileName }),
   
   deleteAwsCredentialsSecure: (profileName: string): Promise<string> =>
-    window.__TAURI__.core.invoke('delete_aws_credentials_secure', { profileName }),
+    invoke('delete_aws_credentials_secure', { profileName }),
 
   // 設定管理API
   getConfig: (): Promise<AppConfig> =>
-    window.__TAURI__.core.invoke('get_config'),
+    invoke('get_config'),
   
   setConfig: (config: AppConfig): Promise<boolean> =>
-    window.__TAURI__.core.invoke('set_config', { config }),
+    invoke('set_config', { config }),
   
   updateConfig: (updates: ConfigUpdate): Promise<AppConfig> =>
-    window.__TAURI__.core.invoke('update_config', { updates }),
+    invoke('update_config', { updates }),
   
   resetConfig: (): Promise<AppConfig> =>
-    window.__TAURI__.core.invoke('reset_config'),
+    invoke('reset_config'),
   
   validateConfigFile: (): Promise<ConfigValidationResult> =>
-    window.__TAURI__.core.invoke('validate_config_file'),
+    invoke('validate_config_file'),
   
   backupConfig: (): Promise<string> =>
-    window.__TAURI__.core.invoke('backup_config'),
+    invoke('backup_config'),
   
   restoreConfig: (backupPath: string): Promise<AppConfig> =>
-    window.__TAURI__.core.invoke('restore_config', { backupPath }),
+    invoke('restore_config', { backupPath }),
   
   addRecentFile: (filePath: string): Promise<AppConfig> =>
-    window.__TAURI__.core.invoke('add_recent_file', { filePath }),
+    invoke('add_recent_file', { filePath }),
   
   clearRecentFiles: (): Promise<AppConfig> =>
-    window.__TAURI__.core.invoke('clear_recent_files'),
+    invoke('clear_recent_files'),
 
   // 状態管理API
   getAppState: (): Promise<AppState> =>
-    window.__TAURI__.core.invoke('get_app_state'),
+    invoke('get_app_state'),
   
   setAppState: (newState: AppState): Promise<string> =>
-    window.__TAURI__.core.invoke('set_app_state', { newState }),
+    invoke('set_app_state', { newState }),
   
   updateAppState: (update: StateUpdate): Promise<string> =>
-    window.__TAURI__.core.invoke('update_app_state', { update }),
+    invoke('update_app_state', { update }),
   
   addToUploadQueue: (filePath: string): Promise<string> =>
-    window.__TAURI__.core.invoke('add_to_upload_queue', { filePath }),
+    invoke('add_to_upload_queue', { filePath }),
   
   removeFromUploadQueue: (itemId: string): Promise<string> =>
-    window.__TAURI__.core.invoke('remove_from_upload_queue', { itemId }),
+    invoke('remove_from_upload_queue', { itemId }),
   
   updateSystemStats: (): Promise<SystemStatus> =>
-    window.__TAURI__.core.invoke('update_system_stats'),
+    invoke('update_system_stats'),
   
   resetAppState: (): Promise<string> =>
-    window.__TAURI__.core.invoke('reset_app_state'),
+    invoke('reset_app_state'),
+  
 }; 

@@ -17,11 +17,7 @@ use commands::config::*;
 use commands::state_management::*;
 use commands::aws_auth::*;
 
-// デモ用のgreetコマンド（後で削除予定）
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -32,7 +28,7 @@ pub fn run() {
     .plugin(tauri_plugin_shell::init())
     .manage(app_state)
     .invoke_handler(tauri::generate_handler![
-        greet,
+
         // ファイル操作API
         list_files,
         get_file_info,

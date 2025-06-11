@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { TauriCommands } from '../types/tauri-commands';
-import type { AwsCredentials, AwsAuthResult, PermissionCheck, AwsUserIdentity } from '../types/tauri-commands';
+import type { AwsCredentials, AwsAuthResult, PermissionCheck } from '../types/tauri-commands';
+import { AWS_REGIONS, DEFAULT_REGION } from '../constants/aws-regions';
 import './AwsAuthSetup.css';
 
 interface AwsAuthSetupProps {
@@ -12,7 +13,7 @@ const AwsAuthSetup: React.FC<AwsAuthSetupProps> = ({ onAuthSuccess, onCancel }) 
   const [credentials, setCredentials] = useState<AwsCredentials>({
     access_key_id: '',
     secret_access_key: '',
-    region: 'ap-northeast-1',
+    region: DEFAULT_REGION,
     session_token: undefined,
   });
 
@@ -22,13 +23,6 @@ const AwsAuthSetup: React.FC<AwsAuthSetupProps> = ({ onAuthSuccess, onCancel }) 
   const [profileName, setProfileName] = useState('default');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [savedProfiles, setSavedProfiles] = useState<string[]>([]);
-
-  // 保存されたプロファイル一覧を取得（実装簡略化のため固定値）
-  useEffect(() => {
-    // 実際の実装では、保存されたプロファイル名の一覧を取得
-    setSavedProfiles(['default', 'production', 'development']);
-  }, []);
 
   const handleInputChange = (field: keyof AwsCredentials, value: string) => {
     setCredentials(prev => ({
@@ -124,7 +118,7 @@ const AwsAuthSetup: React.FC<AwsAuthSetupProps> = ({ onAuthSuccess, onCancel }) 
       setCredentials({
         access_key_id: '',
         secret_access_key: '',
-        region: 'ap-northeast-1',
+        region: DEFAULT_REGION,
         session_token: undefined,
       });
       setAuthResult(null);
@@ -135,11 +129,7 @@ const AwsAuthSetup: React.FC<AwsAuthSetupProps> = ({ onAuthSuccess, onCancel }) 
     }
   };
 
-  const regions = [
-    'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2',
-    'ap-northeast-1', 'ap-northeast-2', 'ap-southeast-1', 'ap-southeast-2',
-    'eu-west-1', 'eu-west-2', 'eu-central-1',
-  ];
+
 
   return (
     <div className="aws-auth-setup">
@@ -219,8 +209,10 @@ const AwsAuthSetup: React.FC<AwsAuthSetupProps> = ({ onAuthSuccess, onCancel }) 
             value={credentials.region}
             onChange={(e) => handleInputChange('region', e.target.value)}
           >
-            {regions.map(region => (
-              <option key={region} value={region}>{region}</option>
+            {AWS_REGIONS.map(region => (
+              <option key={region.code} value={region.code}>
+                {region.name}
+              </option>
             ))}
           </select>
         </div>

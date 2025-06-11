@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { TauriCommands, AppConfig, AppState, FileInfo, AwsAuthResult } from "./types/tauri-commands";
+import { TauriCommands, AppConfig, AppState, AwsAuthResult } from "./types/tauri-commands";
+import { DEFAULT_REGION } from "./constants/aws-regions";
 import AwsAuthSetup from "./components/AwsAuthSetup";
 import { ConfigManager } from "./components/ConfigManager";
 import "./App.css";
@@ -7,8 +8,6 @@ import "./App.css";
 type ViewMode = 'test' | 'aws-auth' | 'settings';
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [appState, setAppState] = useState<AppState | null>(null);
   const [testResults, setTestResults] = useState<string[]>([]);
@@ -45,16 +44,7 @@ function App() {
     setCurrentView('test');
   };
 
-  // 従来のgreet機能
-  async function greet() {
-    try {
-      const response = await window.__TAURI__.core.invoke<string>("greet", { name });
-      setGreetMsg(response);
-      addTestResult(`✅ Greet API: ${response}`);
-    } catch (error) {
-      addTestResult(`❌ Greet API エラー: ${error}`);
-    }
-  }
+
 
   // ファイル操作APIテスト
   const testFileOperations = async () => {
@@ -85,7 +75,7 @@ function App() {
       const testConfig = {
         access_key_id: "test_key",
         secret_access_key: "test_secret",
-        region: config.aws_settings.default_region || "ap-northeast-1",
+        region: config.aws_settings.default_region || DEFAULT_REGION,
         bucket_name: "test-bucket"
       };
 
@@ -157,6 +147,7 @@ function App() {
         return (
           <ConfigManager 
             onConfigChange={(newConfig) => setConfig(newConfig)}
+            onClose={() => setCurrentView('test')}
           />
         );
       default:
@@ -203,24 +194,7 @@ function App() {
         </div>
       )}
 
-      {/* 従来のGreet機能 */}
-      <div className="section">
-        <h2>Greet API (デモ)</h2>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            greet();
-          }}
-        >
-          <input
-            onChange={(e) => setName(e.currentTarget.value)}
-            placeholder="名前を入力..."
-            value={name}
-          />
-          <button type="submit">Greet</button>
-        </form>
-        <p>{greetMsg}</p>
-      </div>
+
 
       {/* 設定情報の表示 */}
       <div className="section">
