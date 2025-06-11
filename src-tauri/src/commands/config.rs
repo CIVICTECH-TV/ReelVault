@@ -306,6 +306,12 @@ pub async fn validate_config_file(app: AppHandle) -> Result<ConfigValidationResu
 }
 
 #[tauri::command]
+pub async fn validate_config_data(config: AppConfig) -> Result<ConfigValidationResult, String> {
+    // 渡された設定を直接検証（保存せずに）
+    Ok(validate_config(&config))
+}
+
+#[tauri::command]
 pub async fn backup_config(app: AppHandle) -> Result<String, String> {
     let config_path = get_config_path(&app)?;
     
@@ -325,6 +331,77 @@ pub async fn backup_config(app: AppHandle) -> Result<String, String> {
         .map_err(|e| format!("Failed to create backup: {}", e))?;
 
     Ok(backup_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn export_config(app: AppHandle, export_path: Option<String>) -> Result<String, String> {
+    let config_path = get_config_path(&app)?;
+    
+    if !config_path.exists() {
+        return Err("設定ファイルが存在しません".to_string());
+    }
+
+    let destination_path = if let Some(path) = export_path {
+        PathBuf::from(path)
+    } else {
+        // デフォルトのエクスポートパス（デスクトップにタイムスタンプ付きで）
+        let home_dir = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .map_err(|_| "ホームディレクトリが取得できません".to_string())?;
+        
+        let desktop_path = PathBuf::from(home_dir).join("Desktop");
+        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        desktop_path.join(format!("ReelVault_Config_{}.json", timestamp))
+    };
+
+    fs::copy(&config_path, &destination_path)
+        .map_err(|e| format!("設定のエクスポートに失敗しました: {}", e))?;
+
+    Ok(destination_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn import_config(app: AppHandle, import_path: String) -> Result<AppConfig, String> {
+    let import_file = PathBuf::from(import_path);
+    
+    if !import_file.exists() {
+        return Err("インポートファイルが存在しません".to_string());
+    }
+
+    if !import_file.is_file() {
+        return Err("指定されたパスはファイルではありません".to_string());
+    }
+
+    // インポートファイルの読み込み
+    let import_content = fs::read_to_string(&import_file)
+        .map_err(|e| format!("インポートファイルの読み込みに失敗しました: {}", e))?;
+
+    // JSONとして解析
+    let imported_config: AppConfig = serde_json::from_str(&import_content)
+        .map_err(|e| format!("設定ファイルの形式が正しくありません: {}", e))?;
+
+    // インポートされた設定を検証
+    let validation = validate_config(&imported_config);
+    if !validation.valid {
+        return Err(format!("インポートされた設定に問題があります: {}", validation.errors.join(", ")));
+    }
+
+    // 現在の設定をバックアップしてから新しい設定を適用
+    let config_path = get_config_path(&app)?;
+    if config_path.exists() {
+        let backup_path = get_backup_path(&app)?;
+        fs::copy(&config_path, &backup_path)
+            .map_err(|e| format!("既存設定のバックアップに失敗しました: {}", e))?;
+    }
+
+    // 新しい設定を保存
+    let config_json = serde_json::to_string_pretty(&imported_config)
+        .map_err(|e| format!("設定の保存に失敗しました: {}", e))?;
+
+    fs::write(&config_path, config_json)
+        .map_err(|e| format!("設定ファイルの書き込みに失敗しました: {}", e))?;
+
+    Ok(imported_config)
 }
 
 #[tauri::command]

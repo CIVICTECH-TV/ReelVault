@@ -79,6 +79,7 @@ export interface PermissionCheck {
   action: string;
   resource: string;
   allowed: boolean;
+  error?: string;
 }
 
 // ===== 設定管理API関連の型定義 =====
@@ -245,8 +246,17 @@ export const TauriCommands = {
   validateConfigFile: (): Promise<ConfigValidationResult> =>
     invoke('validate_config_file'),
   
+  validateConfig: (config: AppConfig): Promise<ConfigValidationResult> =>
+    invoke('validate_config_data', { config }),
+  
   backupConfig: (): Promise<string> =>
     invoke('backup_config'),
+  
+  exportConfig: (exportPath?: string): Promise<string> =>
+    invoke('export_config', { exportPath }),
+  
+  importConfig: (importPath: string): Promise<AppConfig> =>
+    invoke('import_config', { importPath }),
   
   restoreConfig: (backupPath: string): Promise<AppConfig> =>
     invoke('restore_config', { backupPath }),
