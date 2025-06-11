@@ -2,7 +2,6 @@
 
 映像制作者向け長期アーカイブストレージ補助ツール
 
-[![Build Status](https://github.com/CIVICTECH-TV/ReelVault/workflows/CI/badge.svg)](https://github.com/CIVICTECH-TV/ReelVault/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## 🎯 概要
