@@ -1,0 +1,92 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# GitHubフロー実践ガイド
+
+このルールは、GitHubフローに則った効率的な開発プロセスを実現するためのガイドラインです。
+
+## 基本原則
+
+1. **master/mainブランチは常にデプロイ可能**
+   - デフォルトブランチ（通常は `master` または `main`）は常に安定した状態を維持します
+   - デフォルトブランチへの直接コミットは禁止されています
+
+2. **新機能開発はブランチから始める**
+   - 新機能や修正は必ず新しいブランチで開発します
+   - ブランチ名は `feature/機能名`、`fix/バグ名` などわかりやすい命名を使用します
+
+3. **頻繁にコミットとプッシュ**
+   - 小さな単位で頻繁にコミットし、作業内容を明確にします
+   - 最低1日1回はリモートリポジトリにプッシュします
+
+4. **プルリクエスト（PR）の活用**
+   - 開発完了後、マージ前にPRを作成します
+   - PRのタイトルと説明は明確に記述します
+   - `gh pr create` コマンドを使用する際は、**一時的なMarkdownファイルに本文を記述し、`-F` または `--body-file` オプションでファイルを指定する**
+
+5. **レビュープロセス**
+   - PRはチームメンバーによるレビューを受けます
+   - レビュー指摘事項は同じブランチで修正します
+
+6. **マージと後処理**
+   - レビュー承認後、デフォルトブランチにマージします
+   - マージ後は不要になったブランチを削除します
+
+## コマンド例
+
+### 新機能開発開始時
+```bash
+# 現在のブランチとデフォルトブランチ名を確認 (例: main or master)
+git branch --show-current 
+git remote show origin | grep 'HEAD branch' 
+
+# デフォルトブランチに移動し、最新化
+git checkout <デフォルトブランチ名> 
+git pull origin <デフォルトブランチ名>
+
+# 新機能ブランチを作成
+git checkout -b feature/新機能名
+```
+
+### 開発中
+```bash
+git add .
+git commit -m "具体的な変更内容の説明"
+git push origin feature/新機能名
+```
+
+### マージ前の準備
+```bash
+git checkout <デフォルトブランチ名>
+git pull origin <デフォルトブランチ名>
+git checkout feature/新機能名
+git rebase <デフォルトブランチ名>
+# 注意: 共有ブランチでforce pushは使用注意。rebase後は必要になることが多い
+git push origin feature/新機能名 --force-with-lease 
+```
+
+### マージ後
+```bash
+git checkout <デフォルトブランチ名>
+git pull origin <デフォルトブランチ名>
+git branch -d feature/新機能名
+# リモートのブランチも削除する場合
+git push origin --delete feature/新機能名 
+```
+
+## ベストプラクティス
+
+- コミットメッセージは具体的かつ明確に書きましょう
+- コンフリクトが発生した場合は、慎重に解決し、動作テストを行いましょう
+- 大きな機能は小さなタスクに分割し、複数のPRに分けることを検討しましょう
+- CI/CDテストがある場合は、全てのテストをパスしてからマージしましょう
+- **GitHub Actions を利用する場合:**
+    - **トリガー:** プルリクエスト時にビルドやテストを実行するには、ワークフローのトリガーに `on: pull_request:` を追加しましょう。
+    - **権限:**
+        - リポジトリのコンテンツ読み取りには `permissions: contents: read` が基本です。
+        - GitHub Pagesへのデプロイに公式の `actions/deploy-pages` を使う場合は、追加で `permissions: pages: write` と `id-token: write` が必要です。（古い方法である `peaceiris/actions-gh-pages` などでは `contents: write` が必要でした。）
+    - **デプロイ制御:**
+        - `main` (または `master`) ブランチへのプッシュ時のみデプロイを実行するには、`build` ジョブと `deploy` ジョブを分離し、`deploy` **ジョブ**に `if: github.ref == 'refs/heads/main' && github.event_name == 'push'` のような条件を追加しましょう。
+        - **注意:** GitHubリポジトリ設定の `Environments` で保護ルール (Protection rules) が設定されている場合があります。これにより、特定のブランチ以外からのデプロイが拒否されることがあるため、上記 `if` 条件による `deploy` ジョブの実行制御が重要になります。
