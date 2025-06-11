@@ -1,0 +1,29 @@
+Title,Status,Priority,Labels,Milestone,Assignee,Description,Estimate
+"AWS CloudFormation テンプレート作成",Todo,High,"infrastructure,aws","v1.0",,"S3バケット、ライフサイクルポリシー、IAMロールを自動作成するCloudFormationテンプレートを作成",5
+"Python CLI基盤の構築",Todo,High,"cli,core","v1.0",,"Click や argparse を使用したCLI基盤を構築。設定ファイル管理機能も含める",3
+"AWS認証・設定管理機能",Todo,High,"aws,auth","v1.0",,"AWS CLI設定の読み込み、S3クライアントの初期化、認証エラーハンドリング",3
+"ファイルアップロード機能（CLI）",Todo,High,"upload,cli","v1.0",,"単一ファイル・フォルダの再帰アップロード、進捗表示、エラーハンドリング",5
+"S3 → Deep Archive自動移行設定",Todo,Medium,"aws,lifecycle","v1.0",,"ライフサイクルポリシーによる1日後のDeep Archive移行設定",2
+"ファイル復元機能（CLI）",Todo,High,"restore,cli","v1.0",,"Deep Archiveからの復元リクエスト、復元状況確認、復元完了通知",5
+"メタデータ管理システム",Todo,Medium,"metadata,database","v1.0",,"アップロードファイルの情報管理（SQLite使用）、検索機能",4
+"設定ファイル管理",Todo,Low,"config,setup","v1.0",,"YAML/JSON形式の設定ファイル、初期設定ウィザード",2
+"エラーハンドリング・ログ機能",Todo,Medium,"logging,error","v1.0",,"包括的なエラーハンドリング、ログファイル出力、デバッグモード",3
+"単体テスト・統合テスト",Todo,Medium,"testing,quality","v1.0",,"pytest使用、モック機能、CI/CD準備",4
+"Flask Webアプリ基盤構築",Todo,High,"web,flask","v1.1",,"Flask基盤、テンプレート設計、セッション管理",3
+"Web UI - ファイルアップロード",Todo,High,"web,upload","v1.1",,"ドラッグ&ドロップ、プログレスバー、複数ファイル対応",4
+"Web UI - 進捗管理ダッシュボード",Todo,Medium,"web,dashboard","v1.1",,"アップロード状況、復元状況の一覧表示、リアルタイム更新",4
+"Web UI - ファイル復元インターフェース",Todo,High,"web,restore","v1.1",,"復元リクエスト送信、状況確認、ダウンロード機能",3
+"Web UI - 設定管理画面",Todo,Low,"web,config","v1.1",,"AWS設定、アプリ設定の Web UI管理",2
+"Responsive デザイン対応",Todo,Low,"web,ui","v1.1",,"モバイル・タブレット対応、モダンなUI/UX",3
+"Premiere Pro連携調査・設計",Todo,Medium,"integration,premiere","v1.2",,"Premiere Pro API調査、プラグイン仕様検討",5
+"エクスポート先選択機能",Todo,Medium,"integration,export","v1.2",,"編集ソフトからReelVaultへの直接エクスポート機能",8
+"DaVinci Resolve連携調査",Todo,Low,"integration,davinci","v1.2",,"DaVinci Resolve連携の技術調査",3
+"通知システム基盤",Todo,Medium,"notification,mobile","v2.0",,"プッシュ通知、メール通知の基盤構築",5
+"iOS アプリ開発",Todo,Low,"mobile,ios","v2.0",,"Swift使用、復元通知、状況モニタリング",14
+"Android アプリ開発",Todo,Low,"mobile,android","v2.0",,"Kotlin使用、復元通知、状況モニタリング",14
+"チーム機能設計",Todo,Low,"team,collaboration","v2.1",,"ユーザー管理、権限設定、共有機能の設計",7
+"ライセンス管理システム",Todo,Low,"license,billing","v2.1",,"Studioプラン、課金システム連携",10
+"ドキュメント整備",Todo,Medium,"documentation","v1.0",,"API ドキュメント、ユーザーガイド、開発者ガイド",6
+"セキュリティ監査・対応",Todo,High,"security,audit","v1.0",,"セキュリティベストプラクティス適用、脆弱性チェック",4
+"パフォーマンス最適化",Todo,Low,"performance,optimization","v1.1",,"大容量ファイル対応、並列処理、キャッシュ機能",5
+"CI/CD パイプライン構築",Todo,Medium,"devops,cicd","v1.0",,"GitHub Actions、自動テスト、デプロイメント",4 
