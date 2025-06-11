@@ -1,10 +1,12 @@
 .config-manager {
-  max-width: 800px;
-  margin: 0 auto;
+  width: 100%;
   padding: 20px;
   background: #1a1a1a;
-  border-radius: 12px;
   color: #e0e0e0;
+  box-sizing: border-box;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .config-manager.loading {
@@ -43,6 +45,7 @@
   margin-bottom: 24px;
   padding-bottom: 16px;
   border-bottom: 1px solid #333;
+  flex-shrink: 0;
 }
 
 .config-header h2 {
@@ -93,6 +96,14 @@
 .btn-warning {
   background: linear-gradient(135deg, #ff9800, #f57c00);
   color: white;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s ease;
 }
 
 .btn-warning:hover {
@@ -119,6 +130,21 @@
   background: rgba(76, 175, 80, 0.1);
   border: 1px solid rgba(76, 175, 80, 0.3);
   color: #4CAF50;
+}
+
+.alert-warning {
+  background-color: #fff3cd;
+  border: 1px solid #ffecb5;
+  color: #856404;
+}
+
+.alert-warning button {
+  background: #ffc107;
+  color: #212529;
+}
+
+.alert-warning button:hover {
+  background: #e0a800;
 }
 
 .alert button {
@@ -174,6 +200,31 @@
   border-bottom: 1px solid #333;
 }
 
+.main-layout {
+  display: flex;
+  gap: 20px;
+  flex-grow: 1;
+  overflow: hidden;
+}
+
+/* Vertical Tabs */
+.main-layout .config-tabs {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 200px;
+  border-bottom: none;
+  border-right: 1px solid #333;
+  margin-bottom: 0;
+  padding-right: 20px;
+  overflow-y: auto;
+}
+
+.main-layout .config-content {
+  flex-grow: 1;
+  overflow-y: auto;
+}
+
 .tab {
   background: none;
   border: none;
@@ -183,6 +234,14 @@
   font-size: 16px;
   border-bottom: 2px solid transparent;
   transition: all 0.3s ease;
+  text-align: left;
+}
+
+.main-layout .tab {
+  border-bottom: none;
+  border-right: 3px solid transparent;
+  padding: 12px 10px;
+  border-radius: 4px;
 }
 
 .tab:hover {
@@ -196,6 +255,11 @@
   background: rgba(76, 175, 80, 0.1);
 }
 
+.main-layout .tab.active {
+  border-bottom-color: transparent;
+  border-right-color: #4CAF50;
+}
+
 .config-content {
   margin-bottom: 20px;
 }
@@ -207,55 +271,229 @@
 }
 
 .config-group {
-  margin-bottom: 20px;
+  margin-bottom: 1.5rem;
+}
+
+.config-group:last-child {
+  margin-bottom: 0;
 }
 
 .config-group label {
   display: block;
-  margin-bottom: 8px;
-  color: #e0e0e0;
+  margin-bottom: 0.5rem;
+  color: #f0f0f0;
   font-weight: 500;
+  font-size: 14px;
+  font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 .config-group input[type="text"],
 .config-group input[type="number"],
+.config-group input[type="password"],
 .config-group select {
   width: 100%;
-  padding: 10px 12px;
-  border: 1px solid #555;
+  box-sizing: border-box;
+  padding: 12px 16px;
+  border: 1px solid #333;
   border-radius: 6px;
   background: #2a2a2a;
-  color: #e0e0e0;
+  color: #f0f0f0;
   font-size: 14px;
-  transition: border-color 0.3s ease;
+  font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .config-group input[type="text"]:focus,
 .config-group input[type="number"]:focus,
+.config-group input[type="password"]:focus,
 .config-group select:focus {
   outline: none;
   border-color: #4CAF50;
-  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+  box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.15);
 }
 
-/* チェックボックス専用のスタイル */
-.config-group .checkbox-wrapper {
+.config-group.centered-field {
+  max-width: 450px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.profile-buttons {
   display: flex;
-  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.profile-buttons button {
+  flex: 1;
+}
+
+.config-group button {
+  padding: 10px 15px;
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  border-radius: 6px;
   cursor: pointer;
-  margin-bottom: 16px;
+  transition: all 0.3s ease;
 }
 
-.config-group .checkbox-wrapper input[type="checkbox"] {
-  margin-right: 8px;
-  margin-left: 0;
-  transform: scale(1.1);
-  accent-color: #4CAF50;
+.btn-danger {
+  background: linear-gradient(135deg, #f44336, #d32f2f);
+  color: white;
 }
 
-.config-group .checkbox-wrapper span {
+.btn-danger:hover:not(:disabled) {
+  background: linear-gradient(135deg, #d32f2f, #c62828);
+  transform: translateY(-1px);
+}
+
+.btn-success {
+  background: linear-gradient(135deg, #28a745, #218838);
+  color: white;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: linear-gradient(135deg, #218838, #1e7e34);
+  transform: translateY(-1px);
+}
+
+.auth-result {
+  max-width: 600px;
+  margin: 20px auto;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid #555;
+  background-color: #2a2a2a;
+}
+
+.auth-result.success {
+  border-color: rgba(76, 175, 80, 0.5);
+}
+
+.auth-result.failure {
+  border-color: rgba(244, 67, 54, 0.5);
+}
+
+.auth-result h3,
+.auth-result h4 {
+  color: #fff;
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+
+.auth-result h4 {
+  border-bottom: 1px solid #444;
+  padding-bottom: 8px;
+  margin-top: 16px;
+}
+
+.auth-result p {
+  margin: 4px 0;
+  color: #ccc;
+}
+
+.user-identity, .permissions {
+  background-color: #333;
+  padding: 12px;
+  border-radius: 6px;
+  margin-top: 12px;
+}
+
+.permissions ul {
+  list-style-type: none;
+  padding-left: 0;
+  margin: 0;
+}
+
+.permissions li {
+  padding: 4px 0;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.permission-result {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 6px;
+}
+
+.permission-result.allowed {
+  background-color: rgba(76, 175, 80, 0.1);
+  color: #81c784;
+}
+
+.permission-result.denied {
+  background-color: rgba(244, 67, 54, 0.1);
+  color: #e57373;
+}
+
+.settings-group-container {
+  width: fit-content;
+  margin: 0 auto;
+}
+
+.setting-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  width: 300px;
+  margin-bottom: 8px;
+}
+
+.setting-row:last-child {
+  margin-bottom: 0;
+}
+
+.setting-row > label {
   color: #e0e0e0;
   font-weight: 500;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 50px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #555;
+  transition: .4s;
+  border-radius: 28px;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 20px;
+  width: 20px;
+  left: 4px;
+  bottom: 4px;
+  background-color: white;
+  transition: .4s;
+  border-radius: 50%;
+}
+
+input:checked + .slider {
+  background-color: #4CAF50;
+}
+
+input:checked + .slider:before {
+  transform: translateX(22px);
 }
 
 .recent-files {
@@ -280,8 +518,6 @@
 
 .recent-files button {
   margin-top: 8px;
-  padding: 6px 12px;
-  font-size: 12px;
 }
 
 .config-info {
@@ -329,4 +565,429 @@
     border-bottom-color: #4CAF50;
     border-right-color: transparent;
   }
-} 
+}
+
+.checkbox-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 4px 0;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+}
+
+.checkbox-item span {
+  color: #e0e0e0;
+  font-weight: 500;
+  flex: 1;
+  white-space: nowrap;
+}
+
+.checkbox-item input[type="checkbox"] {
+  margin-left: 8px;
+  transform: scale(1.1);
+  accent-color: #4CAF50;
+  flex-shrink: 0;
+}
+
+/* --- Status & API Test Tabs --- */
+.status-container, .api-test-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* アップロードキューのスタイル */
+.upload-queue, .current-uploads {
+  background: #2a2a2a;
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid #333;
+}
+
+.queue-item, .upload-progress {
+  background: #333;
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 8px;
+  border: 1px solid #444;
+}
+
+.queue-item:last-child, .upload-progress:last-child {
+  margin-bottom: 0;
+}
+
+.queue-item p, .upload-progress p {
+  margin: 4px 0;
+  color: #e0e0e0;
+}
+
+.queue-more {
+  color: #999;
+  font-style: italic;
+  text-align: center;
+  margin-top: 8px;
+}
+
+/* プログレスバーのスタイル */
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background: #444;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(135deg, #4CAF50, #45a049);
+  transition: width 0.3s ease;
+}
+
+/* エラー表示のスタイル */
+.error-display {
+  background: rgba(244, 67, 54, 0.1);
+  border: 1px solid rgba(244, 67, 54, 0.3);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.error-message {
+  color: #f44336;
+  font-family: monospace;
+  font-size: 14px;
+  word-break: break-all;
+}
+
+.section {
+  padding: 1.5rem;
+  border: 1px solid #333 !important;
+  border-radius: 8px;
+  background-color: #1a1a1a !important;
+  text-align: left;
+  margin-bottom: 1.5rem;
+}
+
+.section:last-child {
+  margin-bottom: 0;
+}
+
+.section h2 {
+  color: #f0f0f0;
+  margin-top: 0;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #444;
+  font-size: 18px;
+  font-weight: 600;
+  font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.section h3 {
+  color: #f0f0f0;
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  font-size: 20px;
+  font-weight: 600;
+  font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* 統一された表示エリアスタイル */
+.config-display,
+.state-display,
+.performance-display,
+.statistics-display,
+.features-display {
+  background-color: #2a2a2a !important;
+  padding: 1rem;
+  border-radius: 6px;
+  border-left: 4px solid #535bf2 !important;
+  margin-top: 0.5rem;
+}
+
+.config-display p,
+.state-display p,
+.performance-display p,
+.statistics-display p,
+.features-display p {
+  margin: 0.5rem 0;
+  font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #f0f0f0 !important;
+  font-weight: 500;
+}
+
+.config-display p:first-child,
+.state-display p:first-child,
+.performance-display p:first-child,
+.statistics-display p:first-child,
+.features-display p:first-child {
+  margin-top: 0;
+}
+
+.config-display p:last-child,
+.state-display p:last-child,
+.performance-display p:last-child,
+.statistics-display p:last-child,
+.features-display p:last-child {
+  margin-bottom: 0;
+}
+
+/* テストボタン */
+.test-buttons {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.test-buttons button {
+  padding: 10px 15px;
+  background-color: #535bf2;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.2s;
+  font-family: inherit;
+}
+
+.test-buttons button:hover {
+  background-color: #4349c2;
+}
+
+/* テスト結果 */
+.test-results-header {
+  margin-bottom: 1rem;
+  text-align: right;
+}
+
+.test-results-header button {
+  padding: 10px 15px;
+  background-color: #f44336;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.test-results-header button:hover {
+  background-color: #d32f2f;
+}
+
+.test-results {
+  max-height: 400px;
+  overflow-y: auto;
+  background-color: #2a2a2a;
+  color: #f0f0f0;
+  padding: 1rem;
+  border-radius: 6px;
+  border-left: 4px solid #535bf2;
+  font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: left;
+}
+
+.test-result {
+  margin-bottom: 0.5rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid #535bf2;
+}
+
+.test-result:last-child {
+  border-bottom: none;
+}
+
+/* --- Light Theme Overrides --- */
+html[data-theme='light'] .config-manager {
+  background: #f9f9f9;
+  color: #333;
+  border: 1px solid #ddd;
+}
+
+html[data-theme='light'] .config-header {
+  border-bottom: 1px solid #ddd;
+}
+html[data-theme='light'] .config-header h2 {
+  color: #333;
+}
+
+html[data-theme='light'] .btn-secondary {
+  background: #f0f0f0;
+  color: #333;
+  border: 1px solid #ccc;
+}
+
+html[data-theme='light'] .btn-secondary:hover {
+  background: #e0e0e0;
+}
+
+html[data-theme='light'] .tab {
+  color: #666;
+}
+html[data-theme='light'] .tab:hover {
+  color: #333;
+  background: #f0f0f0;
+}
+html[data-theme='light'] .tab.active {
+  color: #007bff;
+  border-bottom-color: #007bff;
+  background: rgba(0, 123, 255, 0.1);
+}
+
+html[data-theme='light'] .config-section h3 {
+  color: #333;
+}
+
+html[data-theme='light'] .config-group label {
+  color: #333;
+}
+
+html[data-theme='light'] .config-group input[type="text"],
+html[data-theme='light'] .config-group input[type="number"],
+html[data-theme='light'] .config-group input[type="password"],
+html[data-theme='light'] .config-group select {
+  border: 1px solid #ccc;
+  background: #fff;
+  color: #333;
+}
+
+html[data-theme='light'] .config-group input[type="text"]:focus,
+html[data-theme='light'] .config-group input[type="number"]:focus,
+html[data-theme='light'] .config-group input[type="password"]:focus,
+html[data-theme='light'] .config-group select:focus {
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.2);
+}
+
+html[data-theme='light'] .auth-result {
+  border: 1px solid #ddd;
+  background-color: #f9f9f9;
+}
+html[data-theme='light'] .auth-result h3,
+html[data-theme='light'] .auth-result h4 {
+  color: #333;
+  border-bottom-color: #ddd;
+}
+html[data-theme='light'] .auth-result p {
+  color: #555;
+}
+html[data-theme='light'] .user-identity,
+html[data-theme='light'] .permissions {
+  background-color: #f0f0f0;
+}
+
+html[data-theme='light'] .setting-row > label {
+  color: #333;
+}
+
+html[data-theme='light'] .slider {
+  background-color: #ccc;
+}
+html[data-theme='light'] input:checked + .slider {
+  background-color: #007bff;
+}
+
+html[data-theme='light'] .config-info {
+  color: #666;
+  border-top: 1px solid #ddd;
+}
+
+html[data-theme='light'] .section {
+  border: 1px solid #e0e0e0 !important;
+  background-color: #fff !important;
+}
+
+html[data-theme='light'] .section h2 {
+  color: #333;
+  border-bottom-color: #e0e0e0;
+}
+
+html[data-theme='light'] .config-display,
+html[data-theme='light'] .state-display,
+html[data-theme='light'] .performance-display,
+html[data-theme='light'] .statistics-display,
+html[data-theme='light'] .features-display {
+  background-color: #f8f9fa !important;
+  border-left-color: #007bff !important;
+  border: 1px solid #e0e0e0 !important;
+  border-left: 4px solid #007bff !important;
+}
+html[data-theme='light'] .config-display p,
+html[data-theme='light'] .state-display p,
+html[data-theme='light'] .performance-display p,
+html[data-theme='light'] .statistics-display p,
+html[data-theme='light'] .features-display p {
+  color: #333 !important;
+}
+
+html[data-theme='light'] .test-results {
+  background-color: #f0f0f0 !important;
+  color: #333 !important;
+  border: 1px solid #ddd !important;
+  border-left: 4px solid #007bff !important;
+}
+
+html[data-theme='light'] .test-result {
+  border-bottom: 1px solid #e0e0e0;
+}
+
+html[data-theme='light'] .main-layout .config-tabs {
+  border-right-color: #ddd;
+}
+
+html[data-theme='light'] .main-layout .tab.active {
+  border-right-color: #007bff;
+  border-bottom-color: transparent;
+}
+
+/* --- Danger Zone --- */
+.danger-zone {
+  margin-top: 40px;
+  padding: 20px;
+  border: 1px solid rgba(244, 67, 54, 0.5);
+  border-radius: 8px;
+  background-color: rgba(244, 67, 54, 0.05);
+}
+
+.danger-zone h4 {
+  color: #f44336;
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
+.danger-zone p {
+  color: #e57373;
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+.danger-actions button {
+  width: 100%;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+html[data-theme='light'] .danger-zone {
+  border-color: rgba(211, 47, 47, 0.5);
+  background-color: rgba(211, 47, 47, 0.05);
+}
+
+html[data-theme='light'] .danger-zone h4 {
+  color: #d32f2f;
+}
+
+html[data-theme='light'] .danger-zone p {
+  color: #c62828;
+}
+
+ 
