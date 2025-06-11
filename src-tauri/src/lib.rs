@@ -1,4 +1,23 @@
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
+use std::sync::{Arc, Mutex};
+
+// モジュール定義
+mod commands {
+    pub mod file_operations;
+    pub mod aws_operations; 
+    pub mod config;
+    pub mod state_management;
+    pub mod aws_auth;
+}
+
+// コマンドをインポート
+use commands::file_operations::*;
+use commands::aws_operations::*;
+use commands::config::*;
+use commands::state_management::*;
+use commands::aws_auth::*;
+
+// デモ用のgreetコマンド（後で削除予定）
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -6,9 +25,48 @@ fn greet(name: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  // アプリケーション状態の初期化
+  let app_state = Arc::new(Mutex::new(commands::state_management::AppState::default()));
+
   tauri::Builder::default()
     .plugin(tauri_plugin_shell::init())
-    .invoke_handler(tauri::generate_handler![greet])
+    .manage(app_state)
+    .invoke_handler(tauri::generate_handler![
+        greet,
+        // ファイル操作API
+        list_files,
+        get_file_info,
+        watch_directory,
+        // AWS操作API
+        test_aws_connection,
+        upload_file,
+        list_s3_objects,
+        restore_file,
+        // AWS認証API
+        authenticate_aws,
+        test_s3_bucket_access,
+        save_aws_credentials_secure,
+        load_aws_credentials_secure,
+        delete_aws_credentials_secure,
+        // 設定管理API
+        get_config,
+        set_config,
+        update_config,
+        reset_config,
+        validate_config_file,
+        backup_config,
+        restore_config,
+        add_recent_file,
+        clear_recent_files,
+        // 状態管理API
+        get_app_state,
+        set_app_state,
+        update_app_state,
+        add_to_upload_queue,
+        remove_from_upload_queue,
+        update_system_stats,
+        reset_app_state
+    ])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
