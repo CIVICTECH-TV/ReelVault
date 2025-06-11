@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 mod commands {
     pub mod file_operations;
     pub mod aws_operations; 
-    pub mod config_management;
+    pub mod config;
     pub mod state_management;
     pub mod aws_auth;
 }
@@ -13,7 +13,7 @@ mod commands {
 // コマンドをインポート
 use commands::file_operations::*;
 use commands::aws_operations::*;
-use commands::config_management::*;
+use commands::config::*;
 use commands::state_management::*;
 use commands::aws_auth::*;
 
@@ -53,6 +53,11 @@ pub fn run() {
         set_config,
         update_config,
         reset_config,
+        validate_config_file,
+        backup_config,
+        restore_config,
+        add_recent_file,
+        clear_recent_files,
         // 状態管理API
         get_app_state,
         set_app_state,

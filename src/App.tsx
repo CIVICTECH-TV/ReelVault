@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { TauriCommands, AppConfig, AppState, FileInfo, AwsAuthResult } from "./types/tauri-commands";
 import AwsAuthSetup from "./components/AwsAuthSetup";
+import { ConfigManager } from "./components/ConfigManager";
 import "./App.css";
 
 type ViewMode = 'test' | 'aws-auth' | 'settings';
@@ -84,7 +85,7 @@ function App() {
       const testConfig = {
         access_key_id: "test_key",
         secret_access_key: "test_secret",
-        region: config.aws.region || "ap-northeast-1",
+        region: config.aws_settings.default_region || "ap-northeast-1",
         bucket_name: "test-bucket"
       };
 
@@ -103,15 +104,14 @@ function App() {
     try {
       // 設定を更新
       const updateResult = await TauriCommands.updateConfig({
-        section: "app",
-        values: { notification_enabled: true }
+        "user_preferences.notification_enabled": true
       });
-      addTestResult(`✅ 設定更新: ${updateResult}`);
+      addTestResult(`✅ 設定更新完了`);
+      setConfig(updateResult);
 
-      // 設定を再読み込み
-      const newConfig = await TauriCommands.getConfig();
-      setConfig(newConfig);
-      addTestResult(`✅ 設定再読み込み完了`);
+      // 設定検証テスト
+      const validation = await TauriCommands.validateConfigFile();
+      addTestResult(`✅ 設定検証: ${validation.valid ? "有効" : "無効"}`);
     } catch (error) {
       addTestResult(`❌ 設定操作エラー: ${error}`);
     }
@@ -155,11 +155,9 @@ function App() {
         );
       case 'settings':
         return (
-          <div className="settings-view">
-            <h2>⚙️ Settings</h2>
-            <p>設定画面は開発中です。</p>
-            <button onClick={() => setCurrentView('test')}>テスト画面に戻る</button>
-          </div>
+          <ConfigManager 
+            onConfigChange={(newConfig) => setConfig(newConfig)}
+          />
         );
       default:
         return renderTestView();
@@ -229,11 +227,11 @@ function App() {
         <h2>現在の設定</h2>
         {config && (
           <div className="config-display">
-            <p><strong>AWS Region:</strong> {config.aws.region}</p>
-            <p><strong>Bucket:</strong> {config.aws.bucket_name || "未設定"}</p>
-            <p><strong>言語:</strong> {config.app.language}</p>
-            <p><strong>通知:</strong> {config.app.notification_enabled ? "有効" : "無効"}</p>
-            <p><strong>監視フォルダ数:</strong> {config.watch.directories.length}</p>
+            <p><strong>AWS Region:</strong> {config.aws_settings.default_region}</p>
+            <p><strong>Bucket:</strong> {config.user_preferences.default_bucket_name || "未設定"}</p>
+            <p><strong>言語:</strong> {config.app_settings.language}</p>
+            <p><strong>通知:</strong> {config.user_preferences.notification_enabled ? "有効" : "無効"}</p>
+            <p><strong>バージョン:</strong> {config.version}</p>
           </div>
         )}
       </div>

@@ -84,37 +84,43 @@ export interface PermissionCheck {
 // ===== 設定管理API関連の型定義 =====
 
 export interface AppConfig {
-  aws: AwsSettings;
-  app: AppSettings;
-  watch: WatchSettings;
-}
-
-export interface AwsSettings {
-  region: string;
-  bucket_name: string;
-  access_key_id: string;
-  secret_access_key: string;
+  version: string;
+  app_settings: AppSettings;
+  user_preferences: UserPreferences;
+  aws_settings: AwsSettings;
 }
 
 export interface AppSettings {
-  auto_start: boolean;
-  notification_enabled: boolean;
+  auto_save: boolean;
+  backup_enabled: boolean;
   log_level: string;
   theme: string;
   language: string;
 }
 
-export interface WatchSettings {
-  directories: string[];
-  file_patterns: string[];
-  recursive: boolean;
-  auto_upload: boolean;
-  exclude_patterns: string[];
+export interface UserPreferences {
+  default_bucket_name?: string;
+  default_storage_class: string;
+  compression_enabled: boolean;
+  notification_enabled: boolean;
+  recent_files: string[];
+}
+
+export interface AwsSettings {
+  default_region: string;
+  timeout_seconds: number;
+  max_retries: number;
+  profile_name?: string;
+}
+
+export interface ConfigValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
 }
 
 export interface ConfigUpdate {
-  section: string;
-  values: Record<string, any>;
+  [key: string]: any;
 }
 
 // ===== 状態管理API関連の型定義 =====
@@ -235,14 +241,29 @@ export const TauriCommands = {
   getConfig: (): Promise<AppConfig> =>
     window.__TAURI__.core.invoke('get_config'),
   
-  setConfig: (config: AppConfig): Promise<string> =>
+  setConfig: (config: AppConfig): Promise<boolean> =>
     window.__TAURI__.core.invoke('set_config', { config }),
   
-  updateConfig: (update: ConfigUpdate): Promise<string> =>
-    window.__TAURI__.core.invoke('update_config', { update }),
+  updateConfig: (updates: ConfigUpdate): Promise<AppConfig> =>
+    window.__TAURI__.core.invoke('update_config', { updates }),
   
-  resetConfig: (): Promise<string> =>
+  resetConfig: (): Promise<AppConfig> =>
     window.__TAURI__.core.invoke('reset_config'),
+  
+  validateConfigFile: (): Promise<ConfigValidationResult> =>
+    window.__TAURI__.core.invoke('validate_config_file'),
+  
+  backupConfig: (): Promise<string> =>
+    window.__TAURI__.core.invoke('backup_config'),
+  
+  restoreConfig: (backupPath: string): Promise<AppConfig> =>
+    window.__TAURI__.core.invoke('restore_config', { backupPath }),
+  
+  addRecentFile: (filePath: string): Promise<AppConfig> =>
+    window.__TAURI__.core.invoke('add_recent_file', { filePath }),
+  
+  clearRecentFiles: (): Promise<AppConfig> =>
+    window.__TAURI__.core.invoke('clear_recent_files'),
 
   // 状態管理API
   getAppState: (): Promise<AppState> =>
