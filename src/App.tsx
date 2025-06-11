@@ -1,6 +1,9 @@
 import { useState, useEffect } from "react";
-import { TauriCommands, AppConfig, AppState, FileInfo } from "./types/tauri-commands";
+import { TauriCommands, AppConfig, AppState, FileInfo, AwsAuthResult } from "./types/tauri-commands";
+import AwsAuthSetup from "./components/AwsAuthSetup";
 import "./App.css";
+
+type ViewMode = 'test' | 'aws-auth' | 'settings';
 
 function App() {
   const [greetMsg, setGreetMsg] = useState("");
@@ -8,6 +11,8 @@ function App() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [appState, setAppState] = useState<AppState | null>(null);
   const [testResults, setTestResults] = useState<string[]>([]);
+  const [currentView, setCurrentView] = useState<ViewMode>('test');
+  const [awsAuthResult, setAwsAuthResult] = useState<AwsAuthResult | null>(null);
 
   // アプリ起動時に設定と状態を読み込み
   useEffect(() => {
@@ -30,6 +35,13 @@ function App() {
 
   const addTestResult = (message: string) => {
     setTestResults(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`]);
+  };
+
+  const handleAwsAuthSuccess = (result: AwsAuthResult) => {
+    setAwsAuthResult(result);
+    addTestResult(`✅ AWS認証成功: ${result.user_identity?.arn || 'Unknown user'}`);
+    // 認証成功後、テスト画面に戻る
+    setCurrentView('test');
   };
 
   // 従来のgreet機能
@@ -132,9 +144,66 @@ function App() {
     setTestResults([]);
   };
 
-  return (
-    <div className="container">
+  const renderView = () => {
+    switch (currentView) {
+      case 'aws-auth':
+        return (
+          <AwsAuthSetup
+            onAuthSuccess={handleAwsAuthSuccess}
+            onCancel={() => setCurrentView('test')}
+          />
+        );
+      case 'settings':
+        return (
+          <div className="settings-view">
+            <h2>⚙️ Settings</h2>
+            <p>設定画面は開発中です。</p>
+            <button onClick={() => setCurrentView('test')}>テスト画面に戻る</button>
+          </div>
+        );
+      default:
+        return renderTestView();
+    }
+  };
+
+  const renderTestView = () => (
+    <>
       <h1>ReelVault - Command API テスト</h1>
+
+      {/* ナビゲーションバー */}
+      <div className="navigation">
+        <button 
+          className={currentView === 'test' ? 'active' : ''}
+          onClick={() => setCurrentView('test')}
+        >
+          🧪 API テスト
+        </button>
+        <button 
+          className={currentView === 'aws-auth' ? 'active' : ''}
+          onClick={() => setCurrentView('aws-auth')}
+        >
+          🔐 AWS認証
+        </button>
+        <button 
+          className={currentView === 'settings' ? 'active' : ''}
+          onClick={() => setCurrentView('settings')}
+        >
+          ⚙️ 設定
+        </button>
+      </div>
+
+      {/* AWS認証状態表示 */}
+      {awsAuthResult && (
+        <div className="section">
+          <h2>AWS認証状態</h2>
+          <div className="auth-status">
+            <p><strong>ステータス:</strong> ✅ 認証済み</p>
+            <p><strong>ユーザー:</strong> {awsAuthResult.user_identity?.arn}</p>
+            <p><strong>アカウント:</strong> {awsAuthResult.user_identity?.account}</p>
+            <p><strong>権限:</strong> {awsAuthResult.permissions.join(', ')}</p>
+          </div>
+        </div>
+      )}
 
       {/* 従来のGreet機能 */}
       <div className="section">
@@ -201,12 +270,16 @@ function App() {
         </div>
         <div className="test-results">
           {testResults.map((result, index) => (
-            <div key={index} className="test-result">{result}</div>
+            <div key={index} className="test-result">
+              {result}
+            </div>
           ))}
         </div>
       </div>
-    </div>
+    </>
   );
+
+  return renderView();
 }
 
 export default App; 

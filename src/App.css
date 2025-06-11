@@ -1,18 +1,14 @@
 #root {
-  max-width: 1200px;
+  max-width: 1280px;
   margin: 0 auto;
   padding: 2rem;
-  text-align: left;
+  text-align: center;
 }
 
 .container {
-  max-width: 100%;
-  margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
 }
 
 .logo {
@@ -213,4 +209,66 @@ button[type="submit"]:hover {
     min-width: unset;
     width: 100%;
   }
+}
+
+/* ナビゲーションバー */
+.navigation {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  justify-content: center;
+  background: white;
+  padding: 1rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.navigation button {
+  padding: 0.75rem 1.5rem;
+  border: 2px solid #e1e5e9;
+  border-radius: 8px;
+  background: white;
+  color: #333;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.navigation button:hover {
+  background: #f8f9fa;
+  border-color: #667eea;
+}
+
+.navigation button.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-color: #667eea;
+}
+
+/* AWS認証状態 */
+.auth-status {
+  background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+  border: 2px solid #28a745;
+  border-radius: 8px;
+  padding: 1rem;
+  text-align: left;
+}
+
+.auth-status p {
+  margin: 0.5rem 0;
+  color: #155724;
+}
+
+/* 設定ビュー */
+.settings-view {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.settings-view h2 {
+  margin-bottom: 1rem;
+  color: #333;
 } 

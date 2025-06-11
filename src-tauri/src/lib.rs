@@ -7,6 +7,7 @@ mod commands {
     pub mod aws_operations; 
     pub mod config_management;
     pub mod state_management;
+    pub mod aws_auth;
 }
 
 // コマンドをインポート
@@ -14,6 +15,7 @@ use commands::file_operations::*;
 use commands::aws_operations::*;
 use commands::config_management::*;
 use commands::state_management::*;
+use commands::aws_auth::*;
 
 // デモ用のgreetコマンド（後で削除予定）
 #[tauri::command]
@@ -40,6 +42,12 @@ pub fn run() {
         upload_file,
         list_s3_objects,
         restore_file,
+        // AWS認証API
+        authenticate_aws,
+        test_s3_bucket_access,
+        save_aws_credentials_secure,
+        load_aws_credentials_secure,
+        delete_aws_credentials_secure,
         // 設定管理API
         get_config,
         set_config,

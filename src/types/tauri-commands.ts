@@ -52,6 +52,35 @@ export interface RestoreInfo {
   tier: string;
 }
 
+// ===== AWS認証API関連の型定義 =====
+
+export interface AwsCredentials {
+  access_key_id: string;
+  secret_access_key: string;
+  region: string;
+  session_token?: string;
+}
+
+export interface AwsAuthResult {
+  success: boolean;
+  message: string;
+  user_identity?: AwsUserIdentity;
+  permissions: string[];
+}
+
+export interface AwsUserIdentity {
+  user_id: string;
+  arn: string;
+  account: string;
+}
+
+export interface PermissionCheck {
+  service: string;
+  action: string;
+  resource: string;
+  allowed: boolean;
+}
+
 // ===== 設定管理API関連の型定義 =====
 
 export interface AppConfig {
@@ -185,6 +214,22 @@ export const TauriCommands = {
   
   restoreFile: (s3Key: string, config: AwsConfig, tier: string): Promise<RestoreInfo> =>
     window.__TAURI__.core.invoke('restore_file', { s3Key, config, tier }),
+
+  // AWS認証API
+  authenticateAws: (credentials: AwsCredentials): Promise<AwsAuthResult> =>
+    window.__TAURI__.core.invoke('authenticate_aws', { credentials }),
+  
+  testS3BucketAccess: (credentials: AwsCredentials, bucketName: string): Promise<PermissionCheck> =>
+    window.__TAURI__.core.invoke('test_s3_bucket_access', { credentials, bucketName }),
+  
+  saveAwsCredentialsSecure: (credentials: AwsCredentials, profileName: string): Promise<string> =>
+    window.__TAURI__.core.invoke('save_aws_credentials_secure', { credentials, profileName }),
+  
+  loadAwsCredentialsSecure: (profileName: string): Promise<AwsCredentials> =>
+    window.__TAURI__.core.invoke('load_aws_credentials_secure', { profileName }),
+  
+  deleteAwsCredentialsSecure: (profileName: string): Promise<string> =>
+    window.__TAURI__.core.invoke('delete_aws_credentials_secure', { profileName }),
 
   // 設定管理API
   getConfig: (): Promise<AppConfig> =>
