@@ -58,12 +58,14 @@ ReelVault は、映像制作者が制作済みの映像プロジェクト・素�
 
 ## 📋 システム要件
 
-- **OS**: macOS 10.15+ / Windows 10+ / Linux (Ubuntu 18.04+)
+- **OS**: macOS 10.15+ (Windows, Linux対応は今後予定)
 - **AWSアカウント**（ユーザー自身で作成・管理）
 - **開発環境**:
   - Node.js 18+
   - Rust 1.70+
   - Tauri CLI
+
+> **注意**: 現在はmacOS環境でのみ開発・テストを行っています。Windows・Linux対応は将来のバージョンで実装予定です。
 
 ## 🚀 開発環境のセットアップ
 
