@@ -45,6 +45,7 @@ keyring = "2.3"         # OS キーチェーン統合（macOS Keychain等）
 # ファイル監視・非同期処理
 notify = "6.0"          # ファイルシステム監視
 crossbeam-channel = "0.5"  # 非同期チャンネル通信
+regex = "1.10"          # 正規表現パターンマッチング
 
 # メタデータ管理・データベース
 rusqlite = { version = "0.30", features = ["bundled"] }  # SQLiteデータベース
