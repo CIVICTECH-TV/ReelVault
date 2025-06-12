@@ -9,6 +9,7 @@ mod commands {
     pub mod state_management;
     pub mod aws_auth;
     pub mod metadata;
+    pub mod upload_system;
 }
 
 // コマンドをインポート
@@ -18,6 +19,7 @@ use commands::config::*;
 use commands::state_management::*;
 use commands::aws_auth::*;
 use commands::metadata::*;
+use commands::upload_system::*;
 
 
 
@@ -25,10 +27,12 @@ use commands::metadata::*;
 pub fn run() {
   // アプリケーション状態の初期化
   let app_state = Arc::new(Mutex::new(commands::state_management::AppState::default()));
+  let upload_queue = Arc::new(Mutex::new(commands::upload_system::UploadQueue::new()));
 
   tauri::Builder::default()
     .plugin(tauri_plugin_shell::init())
     .manage(app_state)
+    .manage(upload_queue)
     .invoke_handler(tauri::generate_handler![
 
         // ファイル操作API
@@ -65,7 +69,6 @@ pub fn run() {
         set_app_state,
         update_app_state,
         add_to_upload_queue,
-        remove_from_upload_queue,
         update_system_stats,
         reset_app_state,
         // メタデータ管理API
@@ -75,7 +78,19 @@ pub fn run() {
         search_file_metadata,
         update_file_metadata,
         delete_file_metadata,
-        get_all_tags
+        get_all_tags,
+        // アップロードシステムAPI
+        initialize_upload_queue,
+        open_file_dialog,
+        add_files_to_upload_queue,
+        remove_upload_item,
+        start_upload_processing,
+        stop_upload_processing,
+        get_upload_queue_status,
+        get_upload_queue_items,
+        retry_upload_item,
+        clear_upload_queue,
+        test_upload_config
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {
