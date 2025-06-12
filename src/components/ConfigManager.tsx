@@ -442,6 +442,45 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
     try {
       const result = await TauriCommands.testS3BucketAccess(credentials, bucketName);
       setPermissionCheck(result);
+      
+      // S3バケットアクセステストが成功した場合、自動的にデフォルトバケット名として保存
+      if (result.allowed) {
+        console.log(`S3バケットアクセステスト成功: ${bucketName} をデフォルトバケット名として保存します`);
+        
+        // デフォルトバケット名を更新
+        updateConfigValue('user_preferences.default_bucket_name', bucketName);
+        
+        // 設定を自動保存（バックグラウンドで実行）
+        try {
+          await TauriCommands.setConfig({
+            ...config,
+            user_preferences: {
+              ...config.user_preferences,
+              default_bucket_name: bucketName
+            }
+          });
+          
+          // 親コンポーネントにも設定変更を通知
+          onConfigChange({
+            ...config,
+            user_preferences: {
+              ...config.user_preferences,
+              default_bucket_name: bucketName
+            }
+          });
+          
+          console.log(`デフォルトバケット名「${bucketName}」を自動保存しました`);
+          
+          // 成功メッセージを表示（3秒後に自動消去）
+          setSuccess(`✅ バケットアクセステスト成功！デフォルトバケット名「${bucketName}」を自動保存しました。`);
+          setTimeout(() => setSuccess(null), 3000);
+          
+        } catch (saveError) {
+          console.error('デフォルトバケット名の自動保存に失敗:', saveError);
+          // 保存エラーの場合は警告として表示（致命的ではない）
+          setAuthError(`バケットアクセスは成功しましたが、設定の自動保存に失敗しました: ${saveError instanceof Error ? saveError.message : '不明なエラー'}`);
+        }
+      }
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : 'バケットアクセステストに失敗しました');
     } finally {
