@@ -8,6 +8,7 @@ mod commands {
     pub mod config;
     pub mod state_management;
     pub mod aws_auth;
+    pub mod metadata;
 }
 
 // コマンドをインポート
@@ -16,6 +17,7 @@ use commands::aws_operations::*;
 use commands::config::*;
 use commands::state_management::*;
 use commands::aws_auth::*;
+use commands::metadata::*;
 
 
 
@@ -63,7 +65,15 @@ pub fn run() {
         add_to_upload_queue,
         remove_from_upload_queue,
         update_system_stats,
-        reset_app_state
+        reset_app_state,
+        // メタデータ管理API
+        initialize_metadata_db,
+        create_file_metadata,
+        save_file_metadata,
+        search_file_metadata,
+        update_file_metadata,
+        delete_file_metadata,
+        get_all_tags
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {
