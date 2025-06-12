@@ -7,7 +7,6 @@ use sha2::{Sha256, Digest};
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::sync::Mutex;
-use tauri::State;
 
 /// ファイルメタデータを表す構造体
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -41,10 +40,13 @@ pub struct VideoMetadata {
 #[derive(Debug, Deserialize)]
 pub struct MetadataSearchQuery {
     pub file_name_pattern: Option<String>,
+    #[allow(dead_code)]
     pub tags: Option<Vec<String>>,
     pub size_min: Option<u64>,
     pub size_max: Option<u64>,
+    #[allow(dead_code)]
     pub date_from: Option<String>,
+    #[allow(dead_code)]
     pub date_to: Option<String>,
     pub mime_type: Option<String>,
 }
@@ -317,6 +319,7 @@ pub fn detect_mime_type(file_path: &PathBuf) -> String {
 // Tauri Command API実装
 
 /// グローバルなメタデータデータベース接続
+#[allow(dead_code)]
 pub struct MetadataState(pub Mutex<Option<MetadataDatabase>>);
 
 /// メタデータデータベースを初期化

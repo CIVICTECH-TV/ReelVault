@@ -9,6 +9,12 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [healthStatus, setHealthStatus] = useState<{ isHealthy: boolean; lastCheck: Date | null; bucketName: string | undefined }>({
+    isHealthy: true,
+    lastCheck: null,
+    bucketName: undefined
+  });
+
   // アプリ起動時に設定と状態を読み込み
   useEffect(() => {
     const initializeApp = async () => {
@@ -50,6 +56,14 @@ function App() {
     TauriCommands.getAppState().then(setAppState);
   };
 
+
+
+  const handleHealthStatusChange = (status: { isHealthy: boolean; lastCheck: Date | null; bucketName: string | undefined }) => {
+    setHealthStatus(status);
+  };
+
+
+
   if (isLoading) {
     return <div className="app-status">読み込み中...</div>;
   }
@@ -63,13 +77,23 @@ function App() {
   }
 
   return (
-    <ConfigManager
-      initialConfig={config}
-      initialState={appState}
-      onConfigChange={handleConfigChange}
-      onStateChange={handleStateChange}
-      onAuthSuccess={handleAuthSuccess}
-    />
+    <div className="app-container">
+      <ConfigManager
+        initialConfig={config}
+        initialState={appState}
+        onConfigChange={handleConfigChange}
+        onStateChange={handleStateChange}
+        onAuthSuccess={handleAuthSuccess}
+        onHealthStatusChange={handleHealthStatusChange}
+      />
+      
+      {/* 健全性状態の表示（開発用） */}
+      {!healthStatus.isHealthy && (
+        <div className="app-warning">
+          ⚠️ アップロード機能が利用できません。AWS設定を確認してください。
+        </div>
+      )}
+    </div>
   );
 }
 

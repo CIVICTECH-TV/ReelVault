@@ -430,9 +430,9 @@ fn generate_s3_key(file_path: &str, config: &S3KeyConfig) -> Result<String, Stri
     }
     
     // ディレクトリ構造を保持
-    if config.preserve_directory_structure {
-        if let Some(parent) = path.parent() {
-            if let Some(parent_str) = parent.to_str() {
+            if config.preserve_directory_structure {
+            if let Some(parent) = path.parent() {
+                if let Some(_parent_str) = parent.to_str() {
                 // ホームディレクトリ以下の相対パスを使用
                 if let Some(home_dir) = dirs::home_dir() {
                     if let Ok(relative) = path.strip_prefix(&home_dir) {
@@ -579,7 +579,7 @@ async fn upload_single_file(
     item: UploadItem,
     config: UploadConfig,
     progress_tx: mpsc::Sender<UploadProgress>,
-    app_handle: AppHandle,
+    _app_handle: AppHandle,
 ) -> Result<(), String> {
     use aws_config::{BehaviorVersion, Region};
     use aws_sdk_s3::Client as S3Client;

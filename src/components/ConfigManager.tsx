@@ -6,7 +6,9 @@ import {
   ConfigValidationResult,
   AwsCredentials,
   AwsAuthResult,
-  PermissionCheck
+  PermissionCheck,
+  LifecyclePolicyStatus,
+  AwsConfig
 } from '../types/tauri-commands';
 import { AWS_REGIONS, DEFAULT_REGION } from '../constants/aws-regions';
 import './ConfigManager.css';
@@ -17,6 +19,7 @@ interface ConfigManagerProps {
   onConfigChange: (config: AppConfig) => void;
   onStateChange: (state: AppState) => void;
   onAuthSuccess: () => void;
+  onHealthStatusChange?: (status: { isHealthy: boolean; lastCheck: Date | null; bucketName: string | undefined }) => void;
 }
 
 type ActiveTab = 'status' | 'api_test' | 'auth' | 'app' | 'aws_settings';
@@ -26,7 +29,8 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
   initialState,
   onConfigChange, 
   onStateChange,
-  onAuthSuccess 
+  onAuthSuccess,
+  onHealthStatusChange
 }) => {
   const [config, setConfig] = useState<AppConfig>(initialConfig);
   const [appState, setAppState] = useState<AppState>(initialState);
@@ -60,6 +64,21 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
+  // --- Lifecycle Management State ---
+  const [lifecycleStatus, setLifecycleStatus] = useState<LifecyclePolicyStatus | null>(null);
+  const [isLifecycleLoading, setIsLifecycleLoading] = useState(false);
+
+  const [lifecycleSetupStatus, setLifecycleSetupStatus] = useState<{
+    isVerifying: boolean;
+    message: string;
+    remainingSeconds?: number;
+  }>({ isVerifying: false, message: '' });
+  
+  // ライフサイクル整合性監視
+  const [isLifecycleHealthy, setIsLifecycleHealthy] = useState<boolean>(true);
+  const [lastHealthCheck, setLastHealthCheck] = useState<Date | null>(null);
+  const [healthCheckInterval, setHealthCheckInterval] = useState<number | null>(null);
+
   useEffect(() => {
     console.log('初期設定更新:', initialConfig); // デバッグ用ログ
     setConfig(initialConfig);
@@ -85,6 +104,86 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
     
     loadSavedCredentials();
   }, []);
+
+  // バケット設定時に自動でライフサイクル状況をチェック + 健全性監視開始
+  useEffect(() => {
+    const autoCheckLifecycle = async () => {
+      // バケット名と認証情報が揃っている場合のみ実行
+      if (config.user_preferences.default_bucket_name && 
+          credentials.access_key_id && 
+          credentials.secret_access_key &&
+          !isLifecycleLoading) {
+        
+        console.log('自動ライフサイクル状況チェック開始:', config.user_preferences.default_bucket_name);
+        
+        try {
+          await checkLifecycleStatus();
+          // 健全性チェックも実行
+          await checkLifecycleHealth();
+        } catch (err) {
+          console.log('自動ライフサイクル状況チェックでエラー（非致命的）:', err);
+          // エラーの場合はライフサイクル状況をクリア（未設定状態として表示）
+          setLifecycleStatus(null);
+          setIsLifecycleHealthy(false);
+        }
+      }
+    };
+    
+    // 初回読み込み時は少し遅延を設ける
+    const timeoutId = setTimeout(autoCheckLifecycle, 1000);
+    
+    return () => clearTimeout(timeoutId);
+  }, [config.user_preferences.default_bucket_name, credentials.access_key_id, credentials.secret_access_key]);
+
+  // 定期健全性監視（5分間隔）
+  useEffect(() => {
+    // 既存のインターバルをクリア
+    if (healthCheckInterval) {
+      clearInterval(healthCheckInterval);
+    }
+
+    // バケットが設定されている場合のみ定期監視を開始
+    if (config.user_preferences.default_bucket_name && 
+        credentials.access_key_id && 
+        credentials.secret_access_key) {
+      
+      console.log('ライフサイクル定期監視を開始（5分間隔）');
+      
+      const interval = window.setInterval(async () => {
+        console.log('定期ライフサイクル健全性チェック実行');
+        await checkLifecycleHealth();
+      }, 5 * 60 * 1000); // 5分間隔
+
+      setHealthCheckInterval(interval);
+
+      return () => {
+        clearInterval(interval);
+        setHealthCheckInterval(null);
+      };
+    }
+  }, [config.user_preferences.default_bucket_name, credentials.access_key_id, credentials.secret_access_key]);
+
+  // アプリ終了時のクリーンアップ
+  useEffect(() => {
+    return () => {
+      if (healthCheckInterval) {
+        clearInterval(healthCheckInterval);
+      }
+    };
+  }, []);
+
+  // 健全性状態変化を親に通知
+  useEffect(() => {
+    if (onHealthStatusChange) {
+      onHealthStatusChange({
+        isHealthy: isLifecycleHealthy,
+        lastCheck: lastHealthCheck,
+        bucketName: config.user_preferences.default_bucket_name
+      });
+    }
+  }, [isLifecycleHealthy, lastHealthCheck, config.user_preferences.default_bucket_name]);
+
+
 
   // 設定変更を検知
   useEffect(() => {
@@ -439,6 +538,49 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
     }
   };
 
+  const testLifecycleOperations = async () => {
+    addTestResult('=== ライフサイクル管理テスト開始 ===');
+    
+    // デモ用の認証情報とバケット設定
+    const testConfig: AwsConfig = {
+      access_key_id: credentials.access_key_id || 'DEMO_ACCESS_KEY',
+      secret_access_key: credentials.secret_access_key || 'DEMO_SECRET_KEY',
+      region: credentials.region || 'ap-northeast-1',
+      bucket_name: bucketName || config.user_preferences.default_bucket_name || 'test-bucket'
+    };
+
+    try {
+      // 1. ライフサイクル設定検証
+      addTestResult('1. ライフサイクル設定検証...');
+      const isValid = await TauriCommands.validateLifecycleConfig(testConfig);
+      addTestResult(`   設定有効性: ${isValid ? '✅ 有効' : '❌ 無効'}`);
+
+      // 2. 現在のライフサイクル状況確認
+      addTestResult('2. 現在のライフサイクル状況確認...');
+      const status = await TauriCommands.getLifecycleStatus(testConfig);
+      addTestResult(`   現在の状況: ${JSON.stringify(status)}`);
+
+      // 3. ライフサイクルルール一覧取得
+      addTestResult('3. ライフサイクルルール一覧取得...');
+      const rules = await TauriCommands.listLifecycleRules(testConfig);
+      addTestResult(`   ルール数: ${rules.length}件`);
+
+      // 4. ReelVaultライフサイクル有効化テスト
+      addTestResult('4. ReelVaultライフサイクル有効化テスト...');
+      const enableResult = await TauriCommands.enableReelvaultLifecycle(testConfig);
+      addTestResult(`   有効化結果: ${JSON.stringify(enableResult)}`);
+
+      // 5. 有効化後の状況再確認
+      addTestResult('5. 有効化後の状況再確認...');
+      const newStatus = await TauriCommands.getLifecycleStatus(testConfig);
+      addTestResult(`   更新後状況: ${JSON.stringify(newStatus)}`);
+
+      addTestResult('✅ ライフサイクル管理テスト完了');
+    } catch (error) {
+      addTestResult(`❌ ライフサイクル管理テストエラー: ${error}`);
+    }
+  };
+
   // --- AWS Auth Handlers ---
   const handleInputChange = (field: keyof AwsCredentials, value: string) => {
     setCredentials(prev => ({
@@ -481,14 +623,53 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
 
     setIsAuthLoading(true);
     setAuthError(null);
+    setLifecycleSetupStatus({ 
+      isVerifying: true, 
+      message: 'バケットアクセステスト実行中...',
+      remainingSeconds: undefined
+    });
+
+    let countdownInterval: number | null = null;
 
     try {
+      // バケットアクセステスト実行（内部でライフサイクル設定も含む）
+      setLifecycleSetupStatus({ 
+        isVerifying: true, 
+        message: 'ライフサイクル設定確認中...',
+        remainingSeconds: 60
+      });
+
+      // カウントダウンタイマーを開始
+      countdownInterval = window.setInterval(() => {
+        setLifecycleSetupStatus(prev => {
+          if (prev.remainingSeconds && prev.remainingSeconds > 0) {
+            return {
+              ...prev,
+              remainingSeconds: prev.remainingSeconds - 1,
+              message: `ライフサイクル設定確認中... (残り ${prev.remainingSeconds - 1}秒)`
+            };
+          }
+          return prev;
+        });
+      }, 1000);
+
       const result = await TauriCommands.testS3BucketAccess(credentials, bucketName);
+      
+      // カウントダウン停止
+      if (countdownInterval) {
+        clearInterval(countdownInterval);
+      }
+      
       setPermissionCheck(result);
       
-      // S3バケットアクセステストが成功した場合、自動的にデフォルトバケット名として保存
+      // S3バケットアクセステスト（ライフサイクル設定含む）が成功した場合のみ、バケット名を保存
       if (result.allowed) {
-        console.log(`S3バケットアクセステスト成功: ${bucketName} をデフォルトバケット名として保存します`);
+        setLifecycleSetupStatus({ 
+          isVerifying: false, 
+          message: '✅ ライフサイクル設定完了！バケット名を保存中...'
+        });
+        
+        console.log(`S3バケットアクセステスト成功（ライフサイクル設定確認済み）: ${bucketName} をS3バケット名として保存します`);
         
         // デフォルトバケット名を更新
         updateConfigValue('user_preferences.default_bucket_name', bucketName);
@@ -512,11 +693,39 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
             }
           });
           
-          console.log(`デフォルトバケット名「${bucketName}」を自動保存しました`);
+          console.log(`S3バケット名「${bucketName}」とライフサイクル設定を自動保存しました`);
           
-          // 成功メッセージを表示（3秒後に自動消去）
-          setSuccess(`✅ バケットアクセステスト成功！デフォルトバケット名「${bucketName}」を自動保存しました。`);
-          setTimeout(() => setSuccess(null), 3000);
+          setLifecycleSetupStatus({ 
+            isVerifying: false, 
+            message: '✅ 設定完了！ライフサイクルポリシーが有効になりました。'
+          });
+          
+          // 成功メッセージを3秒後にクリア（完了状態を表示）
+          setTimeout(() => {
+            setLifecycleSetupStatus({ 
+              isVerifying: false, 
+              message: '🎉 S3バケット設定完了！ライフサイクルポリシーが有効です。'
+            });
+            setPermissionCheck(null); // バケットアクセステスト結果はクリア
+            
+            // 完了状態メッセージも5秒後にクリア
+            setTimeout(() => {
+              setLifecycleSetupStatus({ isVerifying: false, message: '' });
+            }, 5000);
+          }, 3000);
+          
+          // ライフサイクル状況を自動チェック
+          setTimeout(async () => {
+            try {
+              await checkLifecycleStatus();
+            } catch (err) {
+              console.log('ライフサイクル状況の自動取得でエラー（非致命的）:', err);
+            }
+          }, 1000);
+          
+          // 成功メッセージを表示（5秒後に自動消去）
+          setSuccess(`✅ バケットアクセステスト成功！\n📋 S3バケット名「${bucketName}」を保存しました\n🔄 ReelVaultライフサイクルポリシーの状況を確認中...`);
+          setTimeout(() => setSuccess(null), 5000);
           
         } catch (saveError) {
           console.error('デフォルトバケット名の自動保存に失敗:', saveError);
@@ -525,11 +734,98 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
         }
       }
     } catch (err) {
+      // カウントダウン停止
+      if (countdownInterval) {
+        clearInterval(countdownInterval);
+      }
+      
+      setLifecycleSetupStatus({ 
+        isVerifying: false, 
+        message: '❌ ライフサイクル設定に失敗しました。'
+      });
+      
       setAuthError(err instanceof Error ? err.message : 'バケットアクセステストに失敗しました');
+      
+      // エラーメッセージを5秒後にクリア
+      setTimeout(() => {
+        setLifecycleSetupStatus({ isVerifying: false, message: '' });
+      }, 5000);
     } finally {
       setIsAuthLoading(false);
     }
   };
+
+  // --- Lifecycle Management Functions ---
+  
+  const getAwsConfigFromCredentials = (): AwsConfig => ({
+    access_key_id: credentials.access_key_id,
+    secret_access_key: credentials.secret_access_key,
+    region: credentials.region,
+    bucket_name: bucketName || config.user_preferences.default_bucket_name || '',
+  });
+
+  const checkLifecycleStatus = async () => {
+    const awsConfig = getAwsConfigFromCredentials();
+    
+    if (!awsConfig.bucket_name) {
+      console.error('バケット名が設定されていません');
+      return;
+    }
+
+    setIsLifecycleLoading(true);
+
+    try {
+      console.log('Checking lifecycle status for bucket:', awsConfig.bucket_name);
+      const status = await TauriCommands.getLifecycleStatus(awsConfig);
+      console.log('Lifecycle status received:', status);
+      setLifecycleStatus(status);
+    } catch (err) {
+      console.error('Error checking lifecycle status:', err);
+      console.error('ライフサイクル状況の取得に失敗しました:', err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsLifecycleLoading(false);
+    }
+  };
+
+
+
+  // ライフサイクル健全性チェック
+  const checkLifecycleHealth = async (): Promise<boolean> => {
+    try {
+      if (!config.user_preferences.default_bucket_name) {
+        console.log('バケット未設定のため健全性チェックをスキップ');
+        setIsLifecycleHealthy(true); // バケット未設定は問題なし
+        return true;
+      }
+
+      console.log(`ライフサイクル健全性チェック開始: ${config.user_preferences.default_bucket_name}`);
+      
+      // ライフサイクル状況を確認
+      const awsConfig = getAwsConfigFromCredentials();
+      awsConfig.bucket_name = config.user_preferences.default_bucket_name;
+      const status = await TauriCommands.getLifecycleStatus(awsConfig);
+
+      const healthy = status.enabled;
+      setIsLifecycleHealthy(healthy);
+      setLastHealthCheck(new Date());
+
+      if (!healthy) {
+        console.warn(`⚠️ ライフサイクル設定異常を検出: ${config.user_preferences.default_bucket_name}`);
+      } else {
+        console.log(`✅ ライフサイクル設定正常: ${config.user_preferences.default_bucket_name}`);
+      }
+
+      return healthy;
+    } catch (err) {
+      console.error('ライフサイクル健全性チェックでエラー:', err);
+      setIsLifecycleHealthy(false);
+      return false;
+    }
+  };
+
+
+
+
 
 
 
@@ -546,14 +842,6 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
     <div className="config-manager">
       <div className="config-header">
         <h2>ReelVault</h2>
-        <div className="config-actions">
-          <button onClick={exportConfig} className="btn-secondary">
-            📤 エクスポート
-          </button>
-          <button onClick={importConfig} className="btn-secondary">
-            📥 インポート
-          </button>
-        </div>
       </div>
 
       {error && (
@@ -629,8 +917,9 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
             className={`tab ${activeTab === 'aws_settings' ? 'active' : ''}`}
             onClick={() => setActiveTab('aws_settings')}
           >
-            ☁️ AWS設定
+            ☁️ AWS S3設定
           </button>
+
           <button 
             className={`tab ${activeTab === 'api_test' ? 'active' : ''}`}
             onClick={() => setActiveTab('api_test')}
@@ -645,10 +934,41 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
               <div className="section">
                 <h2>⚙️ 重要な設定サマリー</h2>
                 <div className="config-display">
-                  <p><strong>🪣 デフォルトBucket:</strong> {config.user_preferences.default_bucket_name || "未設定"}</p>
-                  <p><strong>🗂️ ストレージクラス:</strong> {config.user_preferences.default_storage_class}</p>
+                  <p><strong>🪣 S3バケット名:</strong> {config.user_preferences.default_bucket_name || "未設定"}</p>
+
                   <p><strong>🌍 AWSリージョン:</strong> {config.aws_settings.default_region}</p>
                   <p><strong>⏱️ タイムアウト:</strong> {config.aws_settings.timeout_seconds}秒</p>
+                  <p><strong>🔄 S3ライフサイクル:</strong> 
+                    {config.user_preferences.default_bucket_name ? (
+                      lifecycleStatus ? (
+                        lifecycleStatus.error_message ? (
+                          <span className="status-error">⚠️ {lifecycleStatus.error_message}</span>
+                        ) : lifecycleStatus.enabled ? (
+                          <span className="status-enabled">
+                            ✅ 有効 ({lifecycleStatus.transition_days || 'N/A'}日後 → {lifecycleStatus.storage_class || 'N/A'})
+                          </span>
+                        ) : (
+                          <span className="status-disabled">❌ 無効</span>
+                        )
+                      ) : (
+                        <span className="status-checking">🔄 確認中...</span>
+                      )
+                    ) : (
+                      <span className="status-unavailable">⚠️ バケット未設定</span>
+                    )}
+                  </p>
+                  <p><strong>🩺 アップロード安全性:</strong> 
+                    {isLifecycleHealthy ? (
+                      <span className="status-enabled">✅ 準備完了</span>
+                    ) : (
+                      <span className="status-error">⚠️ 設定に問題あり</span>
+                    )}
+                    {lastHealthCheck && (
+                      <small style={{marginLeft: '8px', opacity: 0.7}}>
+                        (最終確認: {lastHealthCheck.toLocaleTimeString()})
+                      </small>
+                    )}
+                  </p>
                   <p><strong>🏷️ アプリバージョン:</strong> {config.version}</p>
                 </div>
               </div>
@@ -688,13 +1008,14 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
                 <div className="features-display">
                   <p><strong>🔔 通知:</strong> {config.user_preferences.notification_enabled ? "🟢 有効" : "🔴 無効"}</p>
                   <p><strong>📦 圧縮:</strong> {config.user_preferences.compression_enabled ? "🟢 有効" : "🔴 無効"}</p>
-                  <p><strong>💾 自動保存:</strong> {config.app_settings.auto_save ? "🟢 有効" : "🔴 無効"}</p>
-                  <p><strong>🛡️ バックアップ:</strong> {config.app_settings.backup_enabled ? "🟢 有効" : "🔴 無効"}</p>
+                  
                   <p><strong>📂 最近のファイル:</strong> {config.user_preferences.recent_files.length}件保存</p>
                   <p><strong>📄 ログレベル:</strong> {config.app_settings.log_level}</p>
                   <p><strong>🎨 UIテーマ:</strong> {config.app_settings.theme}</p>
                 </div>
               </div>
+
+
 
               {appState.upload_queue.length > 0 && (
                 <div className="section">
@@ -744,6 +1065,7 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
             <div className="config-section">
               <h3>アプリケーション設定</h3>
               
+              {/* 設定管理ボタン */}
               <div className="config-group centered-field">
                 <label>ログレベル:</label>
                 <select
@@ -771,31 +1093,17 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
               </div>
 
               <div className="config-group">
-                <div className="settings-group-container">
-                  <div className="setting-row">
-                    <label htmlFor="auto-save-toggle">自動保存を有効にする</label>
-                    <label className="toggle-switch">
-                      <input 
-                        id="auto-save-toggle"
-                        type="checkbox" 
-                        checked={config.app_settings.auto_save}
-                        onChange={(e) => updateConfigValue('app_settings.auto_save', e.target.checked)} 
-                      />
-                      <span className="slider"></span>
-                    </label>
-                  </div>
-                  <div className="setting-row">
-                    <label htmlFor="backupSwitch">バックアップを有効にする</label>
-                    <label className="toggle-switch">
-                      <input 
-                        id="backupSwitch"
-                        type="checkbox" 
-                        checked={config.app_settings.backup_enabled}
-                        onChange={(e) => updateConfigValue('app_settings.backup_enabled', e.target.checked)} 
-                      />
-                      <span className="slider"></span>
-                    </label>
-                  </div>
+                <h4>設定の管理</h4>
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+                  ※ AWS認証情報は含まれません。セキュリティ上、認証情報は別途管理されます。
+                </p>
+                <div className="config-actions-group">
+                  <button onClick={exportConfig} className="btn-secondary">
+                    📤 アプリ設定エクスポート
+                  </button>
+                  <button onClick={importConfig} className="btn-secondary">
+                    📥 アプリ設定インポート
+                  </button>
                 </div>
               </div>
 
@@ -804,9 +1112,12 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
                 <p>以下の操作は元に戻せません。実行する前に、内容をよく確認してください。</p>
                 <div className="danger-actions">
                     <button onClick={resetConfig} className="btn-danger">
-                      🔄 設定をリセット
+                      🔄 すべての設定をリセット
                     </button>
                 </div>
+                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '8px' }}>
+                  ※ すべてのアプリ設定が初期値に戻されます。AWS認証情報も削除されます。
+                </p>
               </div>
 
             </div>
@@ -815,9 +1126,23 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
             <div className="config-section">
               <h3>AWS認証</h3>
               {authError && (
-                <div className="alert alert-error">
-                  <span>❌ {authError}</span>
-                  <button onClick={() => setAuthError(null)}>×</button>
+                <div className="status-card error">
+                  <h4>認証エラー</h4>
+                  <p>❌ {authError}</p>
+                  <button 
+                    onClick={() => setAuthError(null)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'inherit',
+                      cursor: 'pointer',
+                      float: 'right',
+                      fontSize: '18px',
+                      marginTop: '-32px'
+                    }}
+                  >
+                    ×
+                  </button>
                 </div>
               )}
 
@@ -885,14 +1210,14 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
 
 
               {authResult && (
-                <div className={`auth-result ${authResult.success ? 'success' : 'failure'}`}>
-                  <h3>認証結果</h3>
+                <div className={`status-card ${authResult.success ? 'success' : 'error'}`}>
+                  <h4>AWS認証結果</h4>
                   <p><strong>ステータス:</strong> {authResult.success ? '✅ 成功' : '❌ 失敗'}</p>
                   <p><strong>メッセージ:</strong> {authResult.message}</p>
                   
                   {authResult.user_identity && (
-                    <div className="user-identity">
-                      <h4>ユーザーID</h4>
+                    <div className="status-details">
+                      <h5>ユーザー詳細</h5>
                       <p><strong>User ID:</strong> {authResult.user_identity.user_id}</p>
                       <p><strong>ARN:</strong> {authResult.user_identity.arn}</p>
                       <p><strong>アカウント:</strong> {authResult.user_identity.account}</p>
@@ -900,8 +1225,8 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
                   )}
 
                   {authResult.permissions.length > 0 && (
-                    <div className="permissions">
-                      <h4>権限</h4>
+                    <div className="status-details">
+                      <h5>認可された権限</h5>
                       <ul>
                         {authResult.permissions.map((perm, index) => (
                           <li key={index}>{perm}</li>
@@ -918,27 +1243,95 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
                         type="text"
                         value={bucketName}
                         onChange={(e) => setBucketName(e.target.value)}
-                        placeholder="テストするバケット名を入力"
+                        placeholder={
+                          config.user_preferences.default_bucket_name 
+                            ? `現在設定: ${config.user_preferences.default_bucket_name}`
+                            : "テストするバケット名を入力"
+                        }
                       />
-                      <button
+                                            <button
                         onClick={handleTestBucketAccess}
                         disabled={isAuthLoading || !bucketName}
-                        className="btn-success"
+                        className={
+                          bucketName === config.user_preferences.default_bucket_name && 
+                          lifecycleStatus?.enabled 
+                            ? "btn-secondary" 
+                            : "btn-success"
+                        }
                       >
-                        {isAuthLoading ? 'テスト中...' : 'アクセスをテスト'}
+                        {isAuthLoading ? 'テスト中...' : 
+                         bucketName === config.user_preferences.default_bucket_name ? 
+                           (lifecycleStatus?.enabled ? 
+                            '✅ 設定完了' : 
+                            '🔄 ライフサイクル再設定') : 
+                         'アクセスをテスト'}
                       </button>
+                      {config.user_preferences.default_bucket_name && (
+                        <small style={{ 
+                          display: 'block', 
+                          marginTop: '8px', 
+                          color: lifecycleStatus?.enabled ? 'var(--status-success-text)' : 'var(--status-warning-text)', 
+                          fontSize: '12px' 
+                        }}>
+                          {lifecycleStatus?.enabled ? (
+                            <>💡 「{config.user_preferences.default_bucket_name}」の設定が完了しています。別のバケットをテストする場合は異なる名前を入力してください。</>
+                          ) : (
+                            <>⚠️ 「{config.user_preferences.default_bucket_name}」のライフサイクル設定が見つかりません。同じバケット名でライフサイクル設定を再適用できます。</>
+                          )}
+                        </small>
+                      )}
+                    </div>
+                                      )}
+
+                  {/* 不整合状態の警告表示 */}
+                  {config.user_preferences.default_bucket_name && 
+                   lifecycleStatus !== null && 
+                   !lifecycleStatus.enabled && 
+                   !lifecycleSetupStatus.message && (
+                    <div className="status-card warning">
+                      <h4>⚠️ 設定不整合を検出</h4>
+                      <p>
+                        バケット「{config.user_preferences.default_bucket_name}」は登録されていますが、
+                        ライフサイクルポリシーが見つかりません。
+                      </p>
+                      <p>
+                        <strong>対処方法:</strong> 同じバケット名で「🔄 ライフサイクル再設定」ボタンを押して修復してください。
+                      </p>
                     </div>
                   )}
+
+                  {/* ライフサイクル設定進行状況表示 */}
+                  {lifecycleSetupStatus.message && (
+                    <div className={`status-card ${
+                      lifecycleSetupStatus.isVerifying ? 'warning' : 
+                      lifecycleSetupStatus.message.includes('✅') ? 'success' : 
+                      lifecycleSetupStatus.message.includes('❌') ? 'error' : 'info'
+                    }`}>
+                      <h4>ライフサイクル設定状況</h4>
+                      <p>{lifecycleSetupStatus.message}</p>
+                      {lifecycleSetupStatus.isVerifying && lifecycleSetupStatus.remainingSeconds && (
+                        <div className="status-progress">
+                          <div 
+                            className="status-progress-bar"
+                            style={{
+                              width: `${((60 - lifecycleSetupStatus.remainingSeconds) / 60) * 100}%`
+                            }}
+                          ></div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                    {permissionCheck && (
-                      <div className={`permission-result ${permissionCheck.allowed ? 'allowed' : 'denied'}`}>
-                        <h4>テスト結果</h4>
+                      <div className={`status-card ${permissionCheck.allowed ? 'success' : 'error'}`}>
+                        <h4>バケットアクセステスト結果</h4>
                         <p>
                           {permissionCheck.allowed
                             ? `✅ バケット「${bucketName}」へのアクセスは許可されています。`
                             : `❌ バケット「${bucketName}」へのアクセスは拒否されました。`}
                         </p>
                         {permissionCheck.error && (
-                          <p><strong>エラー:</strong> {permissionCheck.error}</p>
+                          <p><strong>エラー詳細:</strong> {permissionCheck.error}</p>
                         )}
                       </div>
                     )}
@@ -948,31 +1341,51 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
           )}
           {activeTab === 'aws_settings' && (
             <div className="config-section">
-              <h3>AWS設定</h3>
+              <h3>AWS S3設定</h3>
               
               <div className="config-group centered-field">
-                <label>デフォルトバケット名:</label>
+                <label>S3バケット名:</label>
                 <input
                   type="text"
                   value={config.user_preferences.default_bucket_name || ''}
-                  onChange={(e) => updateConfigValue('user_preferences.default_bucket_name', e.target.value || null)}
-                  placeholder="バケット名を入力"
+                  disabled
+                  className="readonly-input"
+                  placeholder="AWS認証タブでバケットアクセステスト時に自動設定されます"
                 />
+                <small className="field-help">
+                  💡 AWS認証タブでバケットアクセステストが成功すると自動的に設定されます
+                </small>
               </div>
 
               <div className="config-group centered-field">
-                <label>デフォルトストレージクラス:</label>
+                <label>S3ライフサイクル設定:</label>
                 <select
-                  value={config.user_preferences.default_storage_class}
-                  onChange={(e) => updateConfigValue('user_preferences.default_storage_class', e.target.value)}
+                  value={
+                    lifecycleStatus?.enabled ? 
+                      `${lifecycleStatus.transition_days}日後-${lifecycleStatus.storage_class}` : 
+                      lifecycleStatus === null ? 'checking' : 'disabled'
+                  }
+                  disabled
+                  className="readonly-select"
                 >
-                  <option value="STANDARD">Standard</option>
-                  <option value="STANDARD_IA">Standard-IA</option>
-                  <option value="ONEZONE_IA">One Zone-IA</option>
-                  <option value="GLACIER">Glacier</option>
-                  <option value="DEEP_ARCHIVE">Deep Archive</option>
+                  <option value="checking">🔄 確認中...</option>
+                  <option value="disabled">❌ 無効</option>
+                  <option value="1日後-DEEP_ARCHIVE">✅ 1日後 → DEEP_ARCHIVE</option>
+                  <option value="7日後-DEEP_ARCHIVE">✅ 7日後 → DEEP_ARCHIVE</option>
+                  <option value="30日後-GLACIER">✅ 30日後 → GLACIER</option>
                 </select>
+                <small className="field-help">
+                  {config.user_preferences.default_bucket_name && 
+                   lifecycleStatus !== null && 
+                   !lifecycleStatus.enabled ? (
+                    <>⚠️ ライフサイクル設定が見つかりません。AWS認証タブで「🔄 ライフサイクル再設定」を実行してください。</>
+                  ) : (
+                    <>💡 ライフサイクル設定はAWS認証タブのバケットアクセステスト時に自動適用されます（表示専用）</>
+                  )}
+                </small>
               </div>
+
+
 
               <div className="config-group centered-field">
                 <label>タイムアウト (秒):</label>
@@ -1043,6 +1456,7 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
               </div>
             </div>
           )}
+
           {activeTab === 'api_test' && (
             <div className="api-test-container">
               <div className="section">
@@ -1053,6 +1467,7 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
                   <button onClick={testConfigOperations}>設定管理 API</button>
                   <button onClick={testStateOperations}>状態管理 API</button>
                   <button onClick={testRestoreOperations}>復元機能テスト</button>
+                  <button onClick={testLifecycleOperations}>ライフサイクル管理テスト</button>
                 </div>
               </div>
               <div className="section">
