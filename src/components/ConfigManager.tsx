@@ -45,7 +45,7 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
   const [testResults, setTestResults] = useState<string[]>([]);
 
   // 開発者モード（隠しAPIテストメニュー用）
-  const [isDeveloperMode, setIsDeveloperMode] = useState(false);
+  const [_isDeveloperMode, _setIsDeveloperMode] = useState(false);
 
   // --- AWS Auth State ---
   const [credentials, setCredentials] = useState<AwsCredentials>({
@@ -396,6 +396,46 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
       onStateChange(newState);
     } catch (error) {
       addTestResult(`❌ 状態操作エラー: ${error}`);
+    }
+  };
+
+  const testRestoreOperations = async () => {
+    addTestResult("🔄 復元機能テストを開始...");
+    
+    // テスト用のデータ
+    const testS3Key = "videos/test-video.mp4";
+    const testConfig = {
+      access_key_id: "test_access_key",
+      secret_access_key: "test_secret_key",
+      region: "us-east-1",
+      bucket_name: "test-bucket"
+    };
+    
+    try {
+      // 1. 復元ジョブ一覧取得テスト
+      const jobs = await TauriCommands.listRestoreJobs();
+      addTestResult(`✅ 復元ジョブ一覧取得: ${jobs.length}個のジョブ`);
+
+      // 2. 復元通知取得テスト
+      const notifications = await TauriCommands.getRestoreNotifications();
+      addTestResult(`✅ 復元通知取得: ${notifications.length}個の通知`);
+
+      // 3. 復元リクエストテスト
+      const restoreResult = await TauriCommands.restoreFile(testS3Key, testConfig, 'Standard');
+      addTestResult(`✅ 復元リクエスト成功: ${restoreResult.restore_status}`);
+
+      // 4. 復元状況確認テスト
+      const statusResult = await TauriCommands.checkRestoreStatus(testS3Key, testConfig);
+      addTestResult(`✅ 復元状況確認: ${statusResult.restore_status}`);
+
+      // 5. 履歴クリアテスト
+      const clearResult = await TauriCommands.clearRestoreHistory();
+      addTestResult(`✅ 復元履歴クリア: ${clearResult}`);
+
+      addTestResult("🎉 復元機能テスト完了!");
+
+    } catch (error) {
+      addTestResult(`❌ 復元機能エラー: ${error}`);
     }
   };
 
@@ -1012,6 +1052,7 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
                   <button onClick={testAwsOperations}>AWS操作 API</button>
                   <button onClick={testConfigOperations}>設定管理 API</button>
                   <button onClick={testStateOperations}>状態管理 API</button>
+                  <button onClick={testRestoreOperations}>復元機能テスト</button>
                 </div>
               </div>
               <div className="section">

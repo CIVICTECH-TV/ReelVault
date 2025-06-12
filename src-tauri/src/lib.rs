@@ -46,6 +46,12 @@ pub fn run() {
         upload_file,
         list_s3_objects,
         restore_file,
+        check_restore_status,
+        get_restore_notifications,
+        download_restored_file,
+        list_restore_jobs,
+        cancel_restore_job,
+        clear_restore_history,
         // AWS認証API
         authenticate_aws,
         test_s3_bucket_access,

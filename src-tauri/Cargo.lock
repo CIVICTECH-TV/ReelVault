@@ -133,6 +133,7 @@ dependencies = [
  "dirs 5.0.1",
  "ffprobe",
  "keyring",
+ "lazy_static",
  "log",
  "notify",
  "regex",
