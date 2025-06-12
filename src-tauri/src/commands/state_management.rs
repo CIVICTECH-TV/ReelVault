@@ -221,6 +221,7 @@ pub async fn add_to_upload_queue(
 
 /// アップロードキューからアイテムを削除
 #[command]
+#[allow(dead_code)]
 pub async fn remove_from_upload_queue(
     item_id: String,
     state: State<'_, AppStateManager>

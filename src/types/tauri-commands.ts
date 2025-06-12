@@ -86,6 +86,37 @@ export interface RestoreNotification {
   timestamp: string;
 }
 
+// ===== ライフサイクル管理API関連の型定義 =====
+
+export interface LifecyclePolicyResult {
+  success: boolean;
+  message: string;
+  rule_id: string;
+  transition_days: number;
+  storage_class: string;
+}
+
+export interface LifecyclePolicyStatus {
+  enabled: boolean;
+  rule_id?: string;
+  transition_days?: number;
+  storage_class?: string;
+  prefix?: string;
+  error_message?: string;
+}
+
+export interface LifecycleRule {
+  id: string;
+  status: string; // "Enabled" or "Disabled"
+  prefix?: string;
+  transitions: LifecycleTransition[];
+}
+
+export interface LifecycleTransition {
+  days: number;
+  storage_class: string;
+}
+
 // ===== AWS認証API関連の型定義 =====
 
 export interface AwsCredentials {
@@ -126,8 +157,6 @@ export interface AppConfig {
 }
 
 export interface AppSettings {
-  auto_save: boolean;
-  backup_enabled: boolean;
   log_level: string;
   theme: string;
   language: string;
@@ -446,5 +475,24 @@ export const TauriCommands = {
   
   clearRestoreHistory: (): Promise<string> =>
     invoke('clear_restore_history'),
+
+  // ライフサイクル管理API
+  enableReelvaultLifecycle: (config: AwsConfig): Promise<LifecyclePolicyResult> =>
+    invoke('enable_reelvault_lifecycle', { config }),
+  
+  getLifecycleStatus: (config: AwsConfig): Promise<LifecyclePolicyStatus> =>
+    invoke('get_lifecycle_status', { config }),
+  
+  disableLifecyclePolicy: (config: AwsConfig): Promise<LifecyclePolicyResult> =>
+    invoke('disable_lifecycle_policy', { config }),
+  
+  listLifecycleRules: (config: AwsConfig): Promise<LifecycleRule[]> =>
+    invoke('list_lifecycle_rules', { config }),
+  
+  validateLifecycleConfig: (config: AwsConfig): Promise<boolean> =>
+    invoke('validate_lifecycle_config', { config }),
+  
+  checkUploadReadiness: (config: AwsConfig): Promise<{ safe: boolean; message: string; lifecycle_healthy: boolean }> =>
+    invoke('check_upload_readiness', { config }),
 
 }; 

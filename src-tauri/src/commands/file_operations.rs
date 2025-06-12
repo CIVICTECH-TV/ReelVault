@@ -31,7 +31,9 @@ pub struct WatchConfig {
 }
 
 /// セキュリティ検証用の定数
+#[allow(dead_code)]
 const MAX_FILE_SIZE_DEFAULT_MB: u64 = 10 * 1024; // デフォルト10GB
+#[allow(dead_code)]
 const ALLOWED_FILE_EXTENSIONS: &[&str] = &[
     "mp4", "mov", "avi", "mkv", "wmv", "flv", "webm",
     "m4v", "3gp", "f4v", "asf", "rm", "rmvb", "vob"
@@ -98,7 +100,7 @@ fn matches_pattern(file_path: &PathBuf, pattern: &str) -> bool {
 
 /// ファイルを除外すべきかチェック
 fn should_exclude_file(file_path: &PathBuf, config: &WatchConfig) -> bool {
-    let file_name = file_path.file_name()
+    let _file_name = file_path.file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("");
     

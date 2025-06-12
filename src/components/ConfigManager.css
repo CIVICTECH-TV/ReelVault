@@ -990,4 +990,648 @@ html[data-theme='light'] .danger-zone p {
   color: #c62828;
 }
 
+/* --- Lifecycle Management Styles --- */
+.lifecycle-info {
+  margin-bottom: 20px;
+}
+
+.info-box {
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.info-box h4 {
+  color: #3b82f6;
+  margin: 0 0 8px 0;
+  font-size: 16px;
+}
+
+.info-box p {
+  margin: 0 0 12px 0;
+  color: #e5e7eb;
+  font-size: 14px;
+}
+
+.info-box ul {
+  margin: 0;
+  padding-left: 20px;
+  color: #d1d5db;
+}
+
+.info-box li {
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+
+.lifecycle-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.lifecycle-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.lifecycle-actions button {
+  flex: 1;
+  min-width: 200px;
+}
+
+.lifecycle-status {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid;
+}
+
+.lifecycle-status.enabled {
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.lifecycle-status.disabled {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.lifecycle-status h5 {
+  margin: 0 0 12px 0;
+  color: #f3f4f6;
+  font-size: 16px;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.status-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.status-item strong {
+  color: #9ca3af;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-enabled {
+  color: #22c55e;
+  font-weight: 600;
+}
+
+.status-disabled {
+  color: #ef4444;
+  font-weight: 600;
+}
+
+.error-detail {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 6px;
+  padding: 12px;
+  margin-top: 12px;
+  color: #fca5a5;
+  font-size: 14px;
+}
+
+.lifecycle-help {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 16px;
+}
+
+.lifecycle-help p {
+  margin: 0 0 8px 0;
+  color: #10b981;
+  font-weight: 600;
+}
+
+.lifecycle-help ul {
+  margin: 0;
+  padding-left: 20px;
+  color: #d1fae5;
+}
+
+.lifecycle-help li {
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+
+.bucket-info {
+  background: rgba(107, 114, 128, 0.1);
+  border: 1px solid rgba(107, 114, 128, 0.3);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.bucket-info p {
+  margin: 0 0 8px 0;
+  color: #e5e7eb;
+  font-size: 14px;
+}
+
+.bucket-info p:last-child {
+  margin-bottom: 0;
+}
+
+.bucket-name {
+  color: #3b82f6;
+  font-weight: 600;
+  margin-left: 8px;
+}
+
+.status-success {
+  color: #22c55e;
+  font-weight: 600;
+  margin-left: 8px;
+}
+
+.status-error {
+  color: #ef4444;
+  font-weight: 600;
+  margin-left: 8px;
+}
+
+.warning {
+  color: #f59e0b;
+  font-size: 14px;
+  font-style: italic;
+  margin-top: 8px;
+}
+
+/* Light Theme Overrides for Lifecycle */
+html[data-theme='light'] .info-box {
+  background: rgba(59, 130, 246, 0.05);
+  border-color: rgba(59, 130, 246, 0.2);
+}
+
+html[data-theme='light'] .info-box h4 {
+  color: #2563eb;
+}
+
+html[data-theme='light'] .info-box p,
+html[data-theme='light'] .info-box ul,
+html[data-theme='light'] .info-box li {
+  color: #374151;
+}
+
+html[data-theme='light'] .lifecycle-status.enabled {
+  background: rgba(34, 197, 94, 0.05);
+  border-color: rgba(34, 197, 94, 0.2);
+}
+
+html[data-theme='light'] .lifecycle-status.disabled {
+  background: rgba(239, 68, 68, 0.05);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+html[data-theme='light'] .lifecycle-status h5 {
+  color: #111827;
+}
+
+html[data-theme='light'] .status-item strong {
+  color: #6b7280;
+}
+
+html[data-theme='light'] .status-enabled {
+  color: #16a34a;
+}
+
+html[data-theme='light'] .status-disabled {
+  color: #dc2626;
+}
+
+html[data-theme='light'] .error-detail {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #dc2626;
+}
+
+html[data-theme='light'] .lifecycle-help {
+  background: rgba(16, 185, 129, 0.05);
+  border-color: rgba(16, 185, 129, 0.2);
+}
+
+html[data-theme='light'] .lifecycle-help p {
+  color: #059669;
+}
+
+html[data-theme='light'] .lifecycle-help ul,
+html[data-theme='light'] .lifecycle-help li {
+  color: #374151;
+}
+
+html[data-theme='light'] .bucket-info {
+  background: rgba(107, 114, 128, 0.05);
+  border-color: rgba(107, 114, 128, 0.2);
+}
+
+html[data-theme='light'] .bucket-info p {
+  color: #374151;
+}
+
+html[data-theme='light'] .bucket-name {
+  color: #2563eb;
+}
+
+html[data-theme='light'] .status-success {
+  color: #16a34a;
+}
+
+html[data-theme='light'] .status-error {
+  color: #dc2626;
+}
+
+html[data-theme='light'] .warning {
+  color: #d97706;
+}
+
+@media (max-width: 768px) {
+  .lifecycle-actions {
+    flex-direction: column;
+  }
+  
+  .lifecycle-actions button {
+    min-width: unset;
+  }
+  
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ライフサイクル状態表示（統合版） */
+.lifecycle-status-display {
+  background-color: #333;
+  padding: 16px;
+  border-radius: 8px;
+  border-left: 4px solid #4CAF50;
+}
+
+.lifecycle-status-display p {
+  margin: 8px 0;
+  color: #e0e0e0;
+  font-size: 14px;
+}
+
+.lifecycle-status-display .status-enabled {
+  color: #81c784;
+  font-weight: 600;
+}
+
+.lifecycle-status-display .status-disabled {
+  color: #e57373;
+  font-weight: 600;
+}
+
+.lifecycle-status-display .status-unknown {
+  color: #ffb74d;
+  font-weight: 600;
+}
+
+.lifecycle-status-display .error-text {
+  color: #e57373;
+  font-weight: 500;
+}
+
+.lifecycle-auto-info {
+  margin-top: 12px;
+  padding: 12px;
+  background-color: rgba(76, 175, 80, 0.1);
+  border-radius: 6px;
+  border-left: 3px solid #4CAF50;
+}
+
+.lifecycle-auto-info .info-text {
+  color: #81c784;
+  font-size: 13px;
+  margin: 0;
+  font-style: italic;
+}
+
+/* ライトテーマ対応 */
+html[data-theme='light'] .lifecycle-status-display {
+  background-color: #f8f9fa;
+  border-left-color: #28a745;
+}
+
+html[data-theme='light'] .lifecycle-status-display p {
+  color: #495057;
+}
+
+html[data-theme='light'] .lifecycle-status-display .status-enabled {
+  color: #28a745;
+}
+
+html[data-theme='light'] .lifecycle-status-display .status-disabled {
+  color: #dc3545;
+}
+
+html[data-theme='light'] .lifecycle-status-display .status-unknown {
+  color: #fd7e14;
+}
+
+html[data-theme='light'] .lifecycle-status-display .error-text {
+  color: #dc3545;
+}
+
+html[data-theme='light'] .lifecycle-auto-info {
+  background-color: rgba(40, 167, 69, 0.1);
+  border-left-color: #28a745;
+}
+
+html[data-theme='light'] .lifecycle-auto-info .info-text {
+  color: #155724;
+}
+
+/* 重要な設定サマリー内のライフサイクル状態 */
+.config-display .status-enabled {
+  color: #81c784;
+  font-weight: 600;
+}
+
+.config-display .status-disabled {
+  color: #e57373;
+  font-weight: 600;
+}
+
+.config-display .status-checking {
+  color: #64b5f6;
+  font-weight: 500;
+  font-style: italic;
+}
+
+.config-display .status-unavailable {
+  color: #ffb74d;
+  font-weight: 500;
+}
+
+/* ライトテーマ対応 */
+html[data-theme='light'] .config-display .status-enabled {
+  color: #28a745;
+}
+
+html[data-theme='light'] .config-display .status-disabled {
+  color: #dc3545;
+}
+
+html[data-theme='light'] .config-display .status-checking {
+  color: #007bff;
+}
+
+html[data-theme='light'] .config-display .status-unavailable {
+  color: #fd7e14;
+}
+
+/* 読み取り専用フィールド */
+.readonly-input,
+.readonly-select {
+  background-color: #2a2a2a !important;
+  color: #888 !important;
+  cursor: not-allowed !important;
+  border-color: #444 !important;
+}
+
+.readonly-input::placeholder {
+  color: #666 !important;
+  font-style: italic;
+}
+
+.field-help {
+  display: block;
+  color: #888;
+  font-size: 12px;
+  margin-top: 4px;
+  font-style: italic;
+  line-height: 1.3;
+}
+
+/* ライトテーマ対応 */
+html[data-theme='light'] .readonly-input,
+html[data-theme='light'] .readonly-select {
+  background-color: #f8f9fa !important;
+  color: #6c757d !important;
+  border-color: #dee2e6 !important;
+}
+
+html[data-theme='light'] .readonly-input::placeholder {
+  color: #adb5bd !important;
+}
+
+html[data-theme='light'] .field-help {
+  color: #6c757d;
+}
+
+/* プラン情報表示 */
+.plan-info {
+  color: #888;
+  font-size: 11px;
+  font-weight: normal;
+  font-style: italic;
+  margin-left: 8px;
+}
+
+html[data-theme='light'] .plan-info {
+  color: #6c757d;
+}
+
+.config-display .status-error {
+  color: #f44336;
+  font-weight: bold;
+}
+
+html[data-theme='light'] .config-display .status-error {
+  color: #d32f2f;
+}
+
+/* === 統一されたステータスコンポーネント === */
+.status-card {
+  margin: 16px 0;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid;
+  font-family: inherit;
+  transition: all 0.2s ease-in-out;
+}
+
+/* ベースカラー定義 */
+:root {
+  --status-info-bg: rgba(59, 130, 246, 0.08);
+  --status-info-border: rgba(59, 130, 246, 0.3);
+  --status-info-text: #3b82f6;
+  
+  --status-warning-bg: rgba(251, 191, 36, 0.08);
+  --status-warning-border: rgba(251, 191, 36, 0.4);
+  --status-warning-text: #f59e0b;
+  
+  --status-success-bg: rgba(34, 197, 94, 0.08);
+  --status-success-border: rgba(34, 197, 94, 0.4);
+  --status-success-text: #22c55e;
+  
+  --status-error-bg: rgba(239, 68, 68, 0.08);
+  --status-error-border: rgba(239, 68, 68, 0.4);
+  --status-error-text: #ef4444;
+}
+
+.status-card.info {
+  background: var(--status-info-bg);
+  border-color: var(--status-info-border);
+}
+
+.status-card.warning {
+  background: var(--status-warning-bg);
+  border-color: var(--status-warning-border);
+}
+
+.status-card.success {
+  background: var(--status-success-bg);
+  border-color: var(--status-success-border);
+}
+
+.status-card.error {
+  background: var(--status-error-bg);
+  border-color: var(--status-error-border);
+}
+
+/* 統一されたタイポグラフィ */
+.status-card h4 {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.status-card p {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.status-card.info h4,
+.status-card.info p {
+  color: var(--status-info-text);
+}
+
+.status-card.warning h4,
+.status-card.warning p {
+  color: var(--status-warning-text);
+}
+
+.status-card.success h4,
+.status-card.success p {
+  color: var(--status-success-text);
+}
+
+.status-card.error h4,
+.status-card.error p {
+  color: var(--status-error-text);
+}
+
+/* プログレスバー */
+.status-progress {
+  margin-top: 12px;
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.status-progress-bar {
+  height: 100%;
+  background: var(--status-warning-text);
+  border-radius: 3px;
+  transition: width 1s ease-in-out;
+  animation: progress-pulse 2s infinite;
+}
+
+@keyframes progress-pulse {
+  0% { opacity: 0.8; }
+  50% { opacity: 1; }
+  100% { opacity: 0.8; }
+}
+
+/* ライトテーマ対応 */
+html[data-theme='light'] {
+  --status-info-bg: rgba(37, 99, 235, 0.05);
+  --status-info-border: rgba(37, 99, 235, 0.25);
+  --status-info-text: #2563eb;
+  
+  --status-warning-bg: rgba(245, 158, 11, 0.06);
+  --status-warning-border: rgba(245, 158, 11, 0.3);
+  --status-warning-text: #d97706;
+  
+  --status-success-bg: rgba(34, 197, 94, 0.06);
+  --status-success-border: rgba(34, 197, 94, 0.3);
+  --status-success-text: #16a34a;
+  
+  --status-error-bg: rgba(220, 38, 38, 0.06);
+  --status-error-border: rgba(220, 38, 38, 0.3);
+  --status-error-text: #dc2626;
+}
+
+html[data-theme='light'] .status-progress {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/* ステータスカード内の詳細セクション */
+.status-details {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.status-details h5 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.status-details p {
+  margin: 4px 0;
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+.status-details ul {
+  margin: 8px 0 0 0;
+  padding-left: 16px;
+  list-style-type: disc;
+}
+
+.status-details li {
+  margin: 2px 0;
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+html[data-theme='light'] .status-details {
+  border-top-color: rgba(0, 0, 0, 0.1);
+}
+
+/* 古いクラス名のレガシースタイルを無効化 */
+.auth-result.success,
+.auth-result.failure,
+.permission-result.allowed,
+.permission-result.denied {
+  /* これらのスタイルは .status-card に移行済み */
+}
+
  

@@ -10,6 +10,7 @@ mod commands {
     pub mod aws_auth;
     pub mod metadata;
     pub mod upload_system;
+    pub mod lifecycle;
 }
 
 // コマンドをインポート
@@ -20,6 +21,7 @@ use commands::state_management::*;
 use commands::aws_auth::*;
 use commands::metadata::*;
 use commands::upload_system::*;
+use commands::lifecycle::*;
 
 
 
@@ -96,7 +98,14 @@ pub fn run() {
         get_upload_queue_items,
         retry_upload_item,
         clear_upload_queue,
-        test_upload_config
+        test_upload_config,
+        // ライフサイクル管理API
+        enable_reelvault_lifecycle,
+        get_lifecycle_status,
+        disable_lifecycle_policy,
+        list_lifecycle_rules,
+        validate_lifecycle_config,
+        check_upload_readiness
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {

@@ -15,8 +15,6 @@ pub struct AppConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
-    pub auto_save: bool,
-    pub backup_enabled: bool,
     pub log_level: String,
     pub theme: String,
     pub language: String,
@@ -61,8 +59,6 @@ impl Default for AppConfig {
 impl Default for AppSettings {
     fn default() -> Self {
         AppSettings {
-            auto_save: true,
-            backup_enabled: true,
             log_level: "info".to_string(),
             theme: "dark".to_string(),
             language: "ja".to_string(),
@@ -219,16 +215,7 @@ pub async fn update_config(app: AppHandle, updates: HashMap<String, serde_json::
     // 更新を適用
     for (key, value) in updates {
         match key.as_str() {
-            "app_settings.auto_save" => {
-                if let Some(v) = value.as_bool() {
-                    config.app_settings.auto_save = v;
-                }
-            }
-            "app_settings.backup_enabled" => {
-                if let Some(v) = value.as_bool() {
-                    config.app_settings.backup_enabled = v;
-                }
-            }
+
             "app_settings.log_level" => {
                 if let Some(v) = value.as_str() {
                     config.app_settings.log_level = v.to_string();
