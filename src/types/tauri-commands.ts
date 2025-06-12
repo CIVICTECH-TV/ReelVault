@@ -145,9 +145,17 @@ export interface UploadItem {
   file_path: string;
   file_name: string;
   file_size: number;
+  s3_key: string;
   status: UploadStatus;
-  created_at: string;
   progress: number;
+  uploaded_bytes: number;
+  speed_mbps: number;
+  eta_seconds?: number;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  error_message?: string;
+  retry_count: number;
 }
 
 export enum UploadStatus {
@@ -156,6 +164,7 @@ export enum UploadStatus {
   Completed = "Completed",
   Failed = "Failed",
   Paused = "Paused",
+  Cancelled = "Cancelled",
 }
 
 export interface UploadProgressInfo {
@@ -165,6 +174,45 @@ export interface UploadProgressInfo {
   percentage: number;
   speed_mbps: number;
   eta_seconds?: number;
+  status: UploadStatus;
+}
+
+// 新しいアップロードシステム用の型定義
+
+export interface UploadConfig {
+  aws_credentials: AwsCredentials;
+  bucket_name: string;
+  max_concurrent_uploads: number;
+  chunk_size_mb: number;
+  retry_attempts: number;
+  timeout_seconds: number;
+  auto_create_metadata: boolean;
+  s3_key_prefix?: string;
+}
+
+export interface UploadStatistics {
+  total_files: number;
+  completed_files: number;
+  failed_files: number;
+  pending_files: number;
+  in_progress_files: number;
+  total_bytes: number;
+  uploaded_bytes: number;
+  average_speed_mbps: number;
+  estimated_time_remaining?: number;
+}
+
+export interface FileSelection {
+  selected_files: string[];
+  total_size: number;
+  file_count: number;
+}
+
+export interface S3KeyConfig {
+  prefix?: string;
+  use_date_folder: boolean;
+  preserve_directory_structure: boolean;
+  custom_naming_pattern?: string;
 }
 
 export interface AppStatistics {
@@ -193,6 +241,7 @@ export interface StateUpdate {
 // ===== Tauri Command API関数の型定義 =====
 
 import { invoke } from '@tauri-apps/api/core';
+import { FileMetadata, MetadataSearchQuery } from './metadata';
 
 // API関数のラッパー
 export const TauriCommands = {
@@ -288,13 +337,66 @@ export const TauriCommands = {
   addToUploadQueue: (filePath: string): Promise<string> =>
     invoke('add_to_upload_queue', { filePath }),
   
-  removeFromUploadQueue: (itemId: string): Promise<string> =>
-    invoke('remove_from_upload_queue', { itemId }),
+  removeUploadItem: (itemId: string): Promise<string> =>
+    invoke('remove_upload_item', { itemId }),
   
   updateSystemStats: (): Promise<SystemStatus> =>
     invoke('update_system_stats'),
   
   resetAppState: (): Promise<string> =>
     invoke('reset_app_state'),
+
+  // メタデータ管理API
+  initializeMetadataDb: (): Promise<string> =>
+    invoke('initialize_metadata_db'),
+  
+  createFileMetadata: (filePath: string): Promise<FileMetadata> =>
+    invoke('create_file_metadata', { filePath }),
+  
+  saveFileMetadata: (metadata: FileMetadata): Promise<string> =>
+    invoke('save_file_metadata', { metadata }),
+  
+  searchFileMetadata: (query: MetadataSearchQuery): Promise<FileMetadata[]> =>
+    invoke('search_file_metadata', { query }),
+  
+  updateFileMetadata: (metadata: FileMetadata): Promise<string> =>
+    invoke('update_file_metadata', { metadata }),
+  
+  deleteFileMetadata: (filePath: string): Promise<string> =>
+    invoke('delete_file_metadata', { filePath }),
+  
+  getAllTags: (): Promise<string[]> =>
+    invoke('get_all_tags'),
+
+  // アップロードシステムAPI
+  initializeUploadQueue: (config: UploadConfig): Promise<string> =>
+    invoke('initialize_upload_queue', { config }),
+  
+  openFileDialog: (multiple: boolean, fileTypes?: string[]): Promise<FileSelection> =>
+    invoke('open_file_dialog', { multiple, fileTypes }),
+  
+  addFilesToUploadQueue: (filePaths: string[], s3KeyConfig: S3KeyConfig): Promise<string[]> =>
+    invoke('add_files_to_upload_queue', { filePaths, s3KeyConfig }),
+  
+  startUploadProcessing: (): Promise<string> =>
+    invoke('start_upload_processing'),
+  
+  stopUploadProcessing: (): Promise<string> =>
+    invoke('stop_upload_processing'),
+  
+  getUploadQueueStatus: (): Promise<UploadStatistics> =>
+    invoke('get_upload_queue_status'),
+  
+  getUploadQueueItems: (): Promise<UploadItem[]> =>
+    invoke('get_upload_queue_items'),
+  
+  retryUploadItem: (itemId: string): Promise<string> =>
+    invoke('retry_upload_item', { itemId }),
+  
+  clearUploadQueue: (): Promise<string> =>
+    invoke('clear_upload_queue'),
+  
+  testUploadConfig: (config: UploadConfig): Promise<string> =>
+    invoke('test_upload_config', { config }),
   
 }; 
