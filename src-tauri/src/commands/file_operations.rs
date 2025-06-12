@@ -1,6 +1,9 @@
 use std::path::PathBuf;
+use std::sync::mpsc::channel;
+use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tauri::command;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher, Config};
 
 /// ファイル情報を表す構造体
 #[derive(Debug, Serialize, Deserialize)]
@@ -19,6 +22,48 @@ pub struct WatchConfig {
     pub path: String,
     pub recursive: bool,
     pub file_patterns: Vec<String>, // 例: ["*.mp4", "*.mov", "*.avi"]
+    pub max_file_size_mb: Option<u64>, // ファイルサイズ制限（MB）
+}
+
+/// セキュリティ検証用の定数
+const MAX_FILE_SIZE_DEFAULT_MB: u64 = 10 * 1024; // デフォルト10GB
+const ALLOWED_FILE_EXTENSIONS: &[&str] = &[
+    "mp4", "mov", "avi", "mkv", "wmv", "flv", "webm",
+    "m4v", "3gp", "f4v", "asf", "rm", "rmvb", "vob"
+];
+
+/// ファイルパスのセキュリティ検証
+fn validate_file_path(path: &PathBuf) -> Result<PathBuf, String> {
+    // パストラバーサル攻撃対策
+    let canonical_path = path.canonicalize()
+        .map_err(|e| format!("Failed to resolve path: {}", e))?;
+    
+    // ユーザーのホームディレクトリ外アクセス制限（macOS/Linux）
+    if let Some(home_dir) = dirs::home_dir() {
+        if !canonical_path.starts_with(&home_dir) {
+            return Err(format!(
+                "Access denied: Path outside user directory: {}", 
+                canonical_path.display()
+            ));
+        }
+    }
+    
+    Ok(canonical_path)
+}
+
+/// ファイルサイズ検証
+fn validate_file_size(file_path: &PathBuf, max_size_mb: u64) -> Result<(), String> {
+    if let Ok(metadata) = file_path.metadata() {
+        let file_size_mb = metadata.len() / (1024 * 1024);
+        if file_size_mb > max_size_mb {
+            return Err(format!(
+                "File too large: {} MB (max: {} MB)", 
+                file_size_mb, 
+                max_size_mb
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// ディレクトリ内のファイル一覧を取得
@@ -28,17 +73,16 @@ pub async fn list_files(directory: String) -> Result<Vec<FileInfo>, String> {
     
     let path = PathBuf::from(&directory);
     
-    if !path.exists() {
-        return Err(format!("Directory does not exist: {}", directory));
-    }
-    
-    if !path.is_dir() {
-        return Err(format!("Path is not a directory: {}", directory));
-    }
+    // セキュリティ検証
+    let validated_path = validate_file_path(&path)?;
     
     let mut files = Vec::new();
     
-    match fs::read_dir(&path) {
+    if !validated_path.is_dir() {
+        return Err(format!("Path is not a directory: {}", validated_path.display()));
+    }
+    
+    match fs::read_dir(&validated_path) {
         Ok(entries) => {
             for entry in entries {
                 match entry {
@@ -83,18 +127,17 @@ pub async fn get_file_info(file_path: String) -> Result<FileInfo, String> {
     
     let path = PathBuf::from(&file_path);
     
-    if !path.exists() {
-        return Err(format!("File does not exist: {}", file_path));
-    }
+    // セキュリティ検証
+    let validated_path = validate_file_path(&path)?;
     
-    let metadata = fs::metadata(&path).map_err(|e| e.to_string())?;
-    let file_name = path
+    let metadata = fs::metadata(&validated_path).map_err(|e| e.to_string())?;
+    let file_name = validated_path
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("Unknown")
         .to_string();
     
-    let extension = path
+    let extension = validated_path
         .extension()
         .and_then(|s| s.to_str())
         .map(|s| s.to_string());
@@ -106,7 +149,7 @@ pub async fn get_file_info(file_path: String) -> Result<FileInfo, String> {
     
     Ok(FileInfo {
         name: file_name,
-        path: file_path,
+        path: validated_path.to_string_lossy().to_string(),
         size: metadata.len(),
         modified,
         is_directory: metadata.is_dir(),
@@ -114,21 +157,16 @@ pub async fn get_file_info(file_path: String) -> Result<FileInfo, String> {
     })
 }
 
-/// ディレクトリ監視を開始（基本実装）
-/// 注意: 実際のファイル監視はnotify crateを使用して後で実装予定
+/// ディレクトリ監視を開始（notify crate実装版）
 #[command]
 pub async fn watch_directory(config: WatchConfig) -> Result<String, String> {
-    // TODO: notify crateを使った実装に置き換える
-    // 現在は設定の検証のみ実行
-    
     let path = PathBuf::from(&config.path);
     
-    if !path.exists() {
-        return Err(format!("Watch directory does not exist: {}", config.path));
-    }
+    // セキュリティ検証
+    let canonical_path = validate_file_path(&path)?;
     
-    if !path.is_dir() {
-        return Err(format!("Watch path is not a directory: {}", config.path));
+    if !canonical_path.is_dir() {
+        return Err(format!("Watch path is not a directory: {}", canonical_path.display()));
     }
     
     // パターンの検証
@@ -136,18 +174,50 @@ pub async fn watch_directory(config: WatchConfig) -> Result<String, String> {
         return Err("File patterns cannot be empty".to_string());
     }
     
-    // 将来の実装: notify crateでファイル監視を開始
-    // let (tx, rx) = channel();
-    // let mut watcher = RecommendedWatcher::new(tx, Duration::from_secs(1))?;
-    // watcher.watch(&path, RecursiveMode::from(config.recursive))?;
+    // 実際のファイル監視実装
+    let (tx, rx) = channel();
     
-    log::info!("File watching configured for: {}", config.path);
+    let notify_config = Config::default()
+        .with_poll_interval(Duration::from_secs(1));
+        
+    let mut watcher = RecommendedWatcher::new(tx, notify_config)
+        .map_err(|e| format!("Failed to create watcher: {}", e))?;
+    
+    let recursive_mode = if config.recursive {
+        RecursiveMode::Recursive
+    } else {
+        RecursiveMode::NonRecursive
+    };
+    
+    watcher.watch(&canonical_path, recursive_mode)
+        .map_err(|e| format!("Failed to start watching: {}", e))?;
+    
+    log::info!("File watching started for: {}", canonical_path.display());
     log::info!("Recursive: {}", config.recursive);
     log::info!("Patterns: {:?}", config.file_patterns);
     
+    // 監視開始の確認（実際の運用では別スレッドで処理）
+    // 現在はセットアップ完了の確認のみ
+    tokio::spawn(async move {
+        // 監視イベント処理（今後の実装で拡張）
+        for result in rx {
+            match result {
+                Ok(event) => {
+                    log::debug!("File event: {:?}", event);
+                    // ここで実際のファイル処理ロジックを呼び出す
+                    // Epic2の他のタスク（#4, #31等）で実装予定
+                }
+                Err(error) => {
+                    log::error!("Watch error: {:?}", error);
+                }
+            }
+        }
+    });
+    
     Ok(format!(
-        "Directory watching configured for: {} (patterns: {:?})", 
-        config.path, 
-        config.file_patterns
+        "Directory watching started for: {} (patterns: {:?}, recursive: {})", 
+        canonical_path.display(),
+        config.file_patterns,
+        config.recursive
     ))
 } 

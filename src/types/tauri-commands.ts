@@ -13,6 +13,7 @@ export interface WatchConfig {
   path: string;
   recursive: boolean;
   file_patterns: string[];
+  max_file_size_mb?: number; // ファイルサイズ制限（MB）
 }
 
 // ===== AWS操作API関連の型定義 =====
