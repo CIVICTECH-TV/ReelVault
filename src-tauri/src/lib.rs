@@ -35,6 +35,8 @@ pub fn run() {
         list_files,
         get_file_info,
         watch_directory,
+        test_watch_system,
+        get_sample_watch_configs,
         // AWS操作API
         test_aws_connection,
         upload_file,

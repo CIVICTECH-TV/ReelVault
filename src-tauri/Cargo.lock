@@ -135,6 +135,7 @@ dependencies = [
  "keyring",
  "log",
  "notify",
+ "regex",
  "ring",
  "rusqlite",
  "serde",

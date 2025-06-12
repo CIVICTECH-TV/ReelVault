@@ -14,6 +14,10 @@ export interface WatchConfig {
   recursive: boolean;
   file_patterns: string[];
   max_file_size_mb?: number; // ファイルサイズ制限（MB）
+  auto_upload: boolean; // 自動アップロード有効
+  exclude_patterns: string[]; // 除外パターン (例: ["*.tmp", "*/.DS_Store"])
+  exclude_directories: string[]; // 除外ディレクトリ
+  auto_metadata: boolean; // 自動メタデータ作成
 }
 
 // ===== AWS操作API関連の型定義 =====
@@ -201,6 +205,12 @@ export const TauriCommands = {
   
   watchDirectory: (config: WatchConfig): Promise<string> =>
     invoke('watch_directory', { config }),
+    
+  testWatchSystem: (config: WatchConfig): Promise<string> =>
+    invoke('test_watch_system', { config }),
+    
+  getSampleWatchConfigs: (): Promise<WatchConfig[]> =>
+    invoke('get_sample_watch_configs'),
 
   // AWS操作API
   testAwsConnection: (config: AwsConfig): Promise<ConnectionTestResult> =>
