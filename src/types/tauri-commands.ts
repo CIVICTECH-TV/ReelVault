@@ -226,9 +226,6 @@ export const TauriCommands = {
   
   loadAwsCredentialsSecure: (profileName: string): Promise<AwsCredentials> =>
     invoke('load_aws_credentials_secure', { profileName }),
-  
-  deleteAwsCredentialsSecure: (profileName: string): Promise<string> =>
-    invoke('delete_aws_credentials_secure', { profileName }),
 
   // 設定管理API
   getConfig: (): Promise<AppConfig> =>

@@ -54,7 +54,6 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
   const [authResult, setAuthResult] = useState<AwsAuthResult | null>(null);
   const [permissionCheck, setPermissionCheck] = useState<PermissionCheck | null>(null);
   const [bucketName, setBucketName] = useState('');
-  const [profileName, setProfileName] = useState('default');
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -68,6 +67,21 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
   useEffect(() => {
     setAppState(initialState);
   }, [initialState]);
+
+  // アプリ起動時にdefaultプロファイルから認証情報を自動読み込み
+  useEffect(() => {
+    const loadSavedCredentials = async () => {
+      try {
+        const savedCredentials = await TauriCommands.loadAwsCredentialsSecure('default');
+        setCredentials(savedCredentials);
+      } catch (err) {
+        // 保存された認証情報がない場合は無視（初回起動時など）
+        console.log('保存された認証情報がありません（初回起動時は正常）');
+      }
+    };
+    
+    loadSavedCredentials();
+  }, []);
 
   // 設定変更を検知
   useEffect(() => {
@@ -400,6 +414,13 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
       const result = await TauriCommands.authenticateAws(credentials);
       setAuthResult(result);
       if (result.success) {
+        // 認証成功時に自動的にdefaultプロファイルで保存
+        try {
+          await TauriCommands.saveAwsCredentialsSecure(credentials, 'default');
+        } catch (saveErr) {
+          console.warn('認証情報の保存に失敗しました:', saveErr);
+          // 保存失敗は警告のみで、認証成功は継続
+        }
         onAuthSuccess();
       }
     } catch (err) {
@@ -428,44 +449,7 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
     }
   };
 
-  const handleLoadCredentials = async () => {
-    setIsAuthLoading(true);
-    setAuthError(null);
 
-    try {
-      const loadedCredentials = await TauriCommands.loadAwsCredentialsSecure(profileName);
-      setCredentials(loadedCredentials);
-    } catch (err) {
-      setAuthError(err instanceof Error ? err.message : '認証情報の読み込みに失敗しました');
-    } finally {
-      setIsAuthLoading(false);
-    }
-  };
-
-  const handleDeleteCredentials = async () => {
-    if (!confirm(`プロファイル「${profileName}」を削除してもよろしいですか？`)) {
-      return;
-    }
-
-    setIsAuthLoading(true);
-    setAuthError(null);
-
-    try {
-      await TauriCommands.deleteAwsCredentialsSecure(profileName);
-      alert(`プロファイル「${profileName}」を削除しました`);
-      setCredentials({
-        access_key_id: '',
-        secret_access_key: '',
-        region: DEFAULT_REGION,
-        session_token: undefined,
-      });
-      setAuthResult(null);
-    } catch (err) {
-      setAuthError(err instanceof Error ? err.message : 'プロファイルの削除に失敗しました');
-    } finally {
-      setIsAuthLoading(false);
-    }
-  };
 
   if (saving) {
     return (
@@ -634,7 +618,7 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
                 <div className="section">
                   <h2>📤 アップロードキュー ({appState.upload_queue.length}件)</h2>
                   <div className="upload-queue">
-                    {appState.upload_queue.slice(0, 5).map((item, index) => (
+                    {appState.upload_queue.slice(0, 5).map((item) => (
                       <div key={item.id} className="queue-item">
                         <p><strong>📄 {item.file_name}</strong></p>
                         <p>サイズ: {(item.file_size / (1024 * 1024)).toFixed(2)}MB | 状態: {item.status} | 進捗: {item.progress}%</p>
@@ -651,7 +635,7 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
                 <div className="section">
                   <h2>⚡ 現在のアップロード</h2>
                   <div className="current-uploads">
-                    {appState.current_uploads.map((upload, index) => (
+                    {appState.current_uploads.map((upload) => (
                       <div key={upload.item_id} className="upload-progress">
                         <p><strong>進行中:</strong> {upload.percentage.toFixed(1)}%</p>
                         <p>速度: {upload.speed_mbps.toFixed(2)}Mbps | 残り時間: {upload.eta_seconds ? `${Math.round(upload.eta_seconds)}秒` : '計算中'}</p>
@@ -755,32 +739,7 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
                 </div>
               )}
 
-              <div className="config-group centered-field">
-                <label htmlFor="profileName">プロファイル名:</label>
-                <input
-                  id="profileName"
-                  type="text"
-                  value={profileName}
-                  onChange={(e) => setProfileName(e.target.value)}
-                  placeholder="プロファイル名を入力"
-                />
-                <div className="profile-buttons">
-                  <button 
-                    onClick={handleLoadCredentials}
-                    disabled={isAuthLoading || !profileName}
-                    className="btn-secondary"
-                  >
-                    プロファイル読込
-                  </button>
-                  <button 
-                    onClick={handleDeleteCredentials}
-                    disabled={isAuthLoading || !profileName}
-                    className="btn-danger"
-                  >
-                    プロファイル削除
-                  </button>
-                </div>
-              </div>
+
 
               <div className="config-group centered-field">
                 <label htmlFor="accessKeyId">アクセスキーID:</label>

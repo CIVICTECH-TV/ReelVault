@@ -43,7 +43,6 @@ pub fn run() {
         test_s3_bucket_access,
         save_aws_credentials_secure,
         load_aws_credentials_secure,
-        delete_aws_credentials_secure,
         // 設定管理API
         get_config,
         set_config,
