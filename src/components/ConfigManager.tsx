@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { 
   TauriCommands, 
   AppConfig, 
@@ -8,9 +9,11 @@ import {
   AwsAuthResult,
   PermissionCheck,
   LifecyclePolicyStatus,
-  AwsConfig
+  AwsConfig,
+  S3Object
 } from '../types/tauri-commands';
 import { AWS_REGIONS, DEFAULT_REGION } from '../constants/aws-regions';
+// RestoreManagerは直接統合済み
 import './ConfigManager.css';
 
 interface ConfigManagerProps {
@@ -22,7 +25,7 @@ interface ConfigManagerProps {
   onHealthStatusChange?: (status: { isHealthy: boolean; lastCheck: Date | null; bucketName: string | undefined }) => void;
 }
 
-type ActiveTab = 'status' | 'api_test' | 'auth' | 'app' | 'aws_settings';
+type ActiveTab = 'status' | 'api_test' | 'auth' | 'app' | 'aws_settings' | 'restore';
 
 export const ConfigManager: React.FC<ConfigManagerProps> = ({ 
   initialConfig,
@@ -78,6 +81,21 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
   const [isLifecycleHealthy, setIsLifecycleHealthy] = useState<boolean>(true);
   const [lastHealthCheck, setLastHealthCheck] = useState<Date | null>(null);
   const [healthCheckInterval, setHealthCheckInterval] = useState<number | null>(null);
+
+  // --- Restore State ---
+  const [s3Objects, setS3Objects] = useState<S3Object[]>([]);
+  const [isLoadingS3Objects, setIsLoadingS3Objects] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [restoreSuccess, setRestoreSuccess] = useState<string | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  const [restoreTier, setRestoreTier] = useState<'Expedited' | 'Standard' | 'Bulk'>('Standard');
+  const [sortField, setSortField] = useState<'name' | 'size' | 'type' | 'modified'>('name');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [currentFolder, setCurrentFolder] = useState<string>('');
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  // グループ表示は常に有効（固定）
+  const [storageWarnings, setStorageWarnings] = useState<{ [key: string]: { type: string; message: string; fee?: number } }>({});
+  const [restoreStatus, setRestoreStatus] = useState<{ [key: string]: { status: string; expiry?: string; progress?: string } }>({});
 
   useEffect(() => {
     console.log('初期設定更新:', initialConfig); // デバッグ用ログ
@@ -823,6 +841,429 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
     }
   };
 
+  // S3オブジェクト一覧を取得
+  const loadS3Objects = async () => {
+    if (!config.user_preferences.default_bucket_name || 
+        !credentials.access_key_id || 
+        !credentials.secret_access_key) {
+      setRestoreError('バケット名またはAWS認証情報が設定されていません');
+      return;
+    }
+
+    setIsLoadingS3Objects(true);
+    setRestoreError(null);
+    
+    try {
+      const awsConfig = getAwsConfigFromCredentials();
+      const objects = await TauriCommands.listS3Objects(
+        awsConfig,
+        undefined // prefix
+      );
+      
+      setS3Objects(objects);
+      checkStorageWarnings(objects);
+      setRestoreSuccess(`${objects.length}個のオブジェクトを取得しました`);
+    } catch (err) {
+      const errorMessage = `S3オブジェクト一覧の取得に失敗しました: ${err}`;
+      setRestoreError(errorMessage);
+      console.error('S3オブジェクト取得エラー:', err);
+    } finally {
+      setIsLoadingS3Objects(false);
+    }
+  };
+
+  // RestoreManagerのエラー/成功ハンドラー
+  const handleRestoreError = (error: string) => {
+    setRestoreError(error);
+    setRestoreSuccess(null);
+  };
+
+  const handleRestoreSuccess = (message: string) => {
+    setRestoreSuccess(message);
+    setRestoreError(null);
+    
+    // 復元リクエスト後、選択をクリア
+    setSelectedFiles([]);
+    
+    // 復元状況をリフレッシュ
+    setTimeout(() => {
+      checkRestoreStatus();
+    }, 2000);
+  };
+
+  // 復元状況をチェックする関数
+  const checkRestoreStatus = async () => {
+    if (!config.user_preferences.default_bucket_name) return;
+
+    try {
+      // selectedFilesまたは現在のS3Objectsの復元状況をチェック
+      const filesToCheck = selectedFiles.length > 0 ? selectedFiles : s3Objects.map(obj => obj.key);
+      
+      if (filesToCheck.length === 0) return;
+
+      const newStatus: { [key: string]: { status: string; expiry?: string; progress?: string } } = {};
+      
+      // 各ファイルの復元状況をチェック
+      for (const fileKey of filesToCheck) {
+        try {
+                     // 復元状況を確認
+           const response = await TauriCommands.checkRestoreStatus(fileKey, {
+             access_key_id: credentials.access_key_id,
+             secret_access_key: credentials.secret_access_key,
+             region: credentials.region,
+             bucket_name: config.user_preferences.default_bucket_name
+           });
+          
+                     if (response.is_restored) {
+             newStatus[fileKey] = {
+               status: 'completed',
+               expiry: response.expiry_date,
+               progress: 'completed'
+             };
+           } else if (response.restore_status && response.restore_status !== 'not-requested') {
+             newStatus[fileKey] = {
+               status: response.restore_status,
+               expiry: response.expiry_date,
+               progress: response.restore_status === 'in-progress' ? 'in-progress' : 'unknown'
+             };
+           }
+        } catch (err) {
+          console.warn(`復元状況確認エラー (${fileKey}):`, err);
+        }
+      }
+      
+      setRestoreStatus(newStatus);
+    } catch (err) {
+      console.error('復元状況確認エラー:', err);
+    }
+  };
+
+  // リストアタブ開いた時の自動S3オブジェクト取得
+  useEffect(() => {
+    if (activeTab === 'restore' && 
+        config.user_preferences.default_bucket_name && 
+        credentials.access_key_id && 
+        s3Objects.length === 0 && 
+        !isLoadingS3Objects) {
+      loadS3Objects();
+    }
+  }, [activeTab, config.user_preferences.default_bucket_name, credentials.access_key_id]);
+
+  // ファイル選択ハンドラー
+  const handleFileSelection = (fileKey: string, isSelected: boolean) => {
+    if (isSelected) {
+      setSelectedFiles(prev => [...prev, fileKey]);
+    } else {
+      setSelectedFiles(prev => prev.filter(key => key !== fileKey));
+    }
+  };
+
+  // 全選択/全解除
+  const handleSelectAll = () => {
+    const deepArchiveFiles = s3Objects.filter(obj => obj.storage_class === 'DEEP_ARCHIVE');
+    if (selectedFiles.length === deepArchiveFiles.length) {
+      setSelectedFiles([]);
+    } else {
+      setSelectedFiles(deepArchiveFiles.map(obj => obj.key));
+    }
+  };
+
+  // ファイル構造を解析（フォルダ階層）
+  const parseFileStructure = (objects: S3Object[]) => {
+    const structure: { [key: string]: { folders: Set<string>; files: S3Object[] } } = {};
+    
+    objects.forEach(obj => {
+      const parts = obj.key.split('/');
+      const fileName = parts[parts.length - 1];
+      const folderPath = parts.slice(0, -1).join('/');
+      
+      if (!structure[folderPath]) {
+        structure[folderPath] = { folders: new Set(), files: [] };
+      }
+      
+      structure[folderPath].files.push(obj);
+      
+      // 親フォルダに子フォルダを登録
+      if (parts.length > 1) {
+        const parentPath = parts.slice(0, -2).join('/');
+        if (!structure[parentPath]) {
+          structure[parentPath] = { folders: new Set(), files: [] };
+        }
+        structure[parentPath].folders.add(folderPath);
+      }
+    });
+    
+    return structure;
+  };
+
+  // ファイルのソート
+  const sortFiles = (files: S3Object[]) => {
+    return [...files].sort((a, b) => {
+      // 常にストレージクラスでソート（グループ表示固定）
+      const storageOrder = { 'DEEP_ARCHIVE': 0, 'STANDARD_IA': 1, 'STANDARD': 2 };
+      const aOrder = storageOrder[a.storage_class as keyof typeof storageOrder] ?? 3;
+      const bOrder = storageOrder[b.storage_class as keyof typeof storageOrder] ?? 3;
+      
+      if (aOrder !== bOrder) {
+        return aOrder - bOrder;
+      }
+      
+      let comparison = 0;
+      
+      switch (sortField) {
+        case 'name':
+          comparison = a.key.localeCompare(b.key);
+          break;
+        case 'size':
+          comparison = a.size - b.size;
+          break;
+        case 'type':
+          const aExt = a.key.split('.').pop() || '';
+          const bExt = b.key.split('.').pop() || '';
+          comparison = aExt.localeCompare(bExt);
+          break;
+        case 'modified':
+          comparison = new Date(a.last_modified).getTime() - new Date(b.last_modified).getTime();
+          break;
+      }
+      
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+  };
+
+  // グルーピングされたファイルを取得（常にグループ表示）
+  const getGroupedFiles = (files: S3Object[]) => {
+    const groups: { [key: string]: S3Object[] } = {};
+    
+    files.forEach(file => {
+      const storageClass = file.storage_class;
+      if (!groups[storageClass]) {
+        groups[storageClass] = [];
+      }
+      groups[storageClass].push(file);
+    });
+
+    // 各グループ内でソート
+    Object.keys(groups).forEach(key => {
+      groups[key] = sortFiles(groups[key]);
+    });
+
+    return groups;
+  };
+
+  // ストレージクラス最低保管期間チェック
+  const checkStorageWarnings = (files: S3Object[]) => {
+    const warnings: { [key: string]: { type: string; message: string; fee?: number } } = {};
+    const now = new Date();
+
+    files.forEach(file => {
+      const uploadDate = new Date(file.last_modified);
+      const daysSinceUpload = Math.floor((now.getTime() - uploadDate.getTime()) / (1000 * 60 * 60 * 24));
+
+      switch (file.storage_class) {
+        case 'DEEP_ARCHIVE':
+          if (daysSinceUpload < 180) { // 180日（6ヶ月）
+            const remainingDays = 180 - daysSinceUpload;
+            const earlyDeletionFee = (file.size / (1024 * 1024 * 1024)) * 0.004 * (remainingDays / 30); // GB単位での概算
+            warnings[file.key] = {
+              type: 'early-deletion',
+              message: `最低保管期間未達（残り${remainingDays}日）`,
+              fee: earlyDeletionFee
+            };
+          }
+          break;
+        case 'STANDARD_IA':
+          if (daysSinceUpload < 30) { // 30日
+            const remainingDays = 30 - daysSinceUpload;
+            const earlyDeletionFee = (file.size / (1024 * 1024 * 1024)) * 0.0125 * (remainingDays / 30);
+            warnings[file.key] = {
+              type: 'early-deletion',
+              message: `最低保管期間未達（残り${remainingDays}日）`,
+              fee: earlyDeletionFee
+            };
+          }
+          break;
+        case 'GLACIER':
+          if (daysSinceUpload < 90) { // 90日
+            const remainingDays = 90 - daysSinceUpload;
+            const earlyDeletionFee = (file.size / (1024 * 1024 * 1024)) * 0.004 * (remainingDays / 30);
+            warnings[file.key] = {
+              type: 'early-deletion',
+              message: `最低保管期間未達（残り${remainingDays}日）`,
+              fee: earlyDeletionFee
+            };
+          }
+          break;
+      }
+    });
+
+    setStorageWarnings(warnings);
+    return warnings;
+  };
+
+  // 復元手数料計算（復元速度を考慮）
+  const calculateRestoreFees = (files: S3Object[], restoreTier: string) => {
+    let totalFee = 0;
+    const feeBreakdown: { [key: string]: number } = {};
+
+    files.forEach(file => {
+      let restoreFee = 0;
+      const sizeGB = file.size / (1024 * 1024 * 1024);
+
+      // ストレージクラス別の復元手数料（GB単位、USD）
+      switch (file.storage_class) {
+        case 'DEEP_ARCHIVE':
+          switch (restoreTier) {
+            case 'Expedited':
+              restoreFee = sizeGB * 0.03; // $0.03/GB
+              break;
+            case 'Standard':
+              restoreFee = sizeGB * 0.0025; // $0.0025/GB
+              break;
+            case 'Bulk':
+              restoreFee = sizeGB * 0.00025; // $0.00025/GB
+              break;
+          }
+          break;
+        case 'GLACIER':
+          switch (restoreTier) {
+            case 'Expedited':
+              restoreFee = sizeGB * 0.03;
+              break;
+            case 'Standard':
+              restoreFee = sizeGB * 0.01;
+              break;
+            case 'Bulk':
+              restoreFee = sizeGB * 0.0025;
+              break;
+          }
+          break;
+        case 'STANDARD_IA':
+          // Standard-IAは復元手数料なし（即座にアクセス可能）
+          restoreFee = 0;
+          break;
+        case 'STANDARD':
+          // Standardは復元不要
+          restoreFee = 0;
+          break;
+      }
+
+      feeBreakdown[file.key] = restoreFee;
+      totalFee += restoreFee;
+    });
+
+    return { total: totalFee, breakdown: feeBreakdown };
+  };
+
+  // ソートハンドラー
+  const handleSort = (field: 'name' | 'size' | 'type' | 'modified') => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // フォルダ選択（フォルダ内の全ファイルを選択）
+  const handleFolderSelection = (folderPath: string, isSelected: boolean) => {
+    const structure = parseFileStructure(s3Objects.filter(obj => obj.storage_class === 'DEEP_ARCHIVE'));
+    const folderFiles = structure[folderPath]?.files || [];
+    
+    if (isSelected) {
+      setSelectedFiles(prev => [...new Set([...prev, ...folderFiles.map(f => f.key)])]);
+    } else {
+      const folderFileKeys = folderFiles.map(f => f.key);
+      setSelectedFiles(prev => prev.filter(key => !folderFileKeys.includes(key)));
+    }
+  };
+
+  // 復元リクエスト実行
+  // ファイルダウンロード処理
+  const handleDownload = async (fileKey: string) => {
+    if (!config.user_preferences.default_bucket_name) {
+      handleRestoreError('バケット名が設定されていません');
+      return;
+    }
+
+    try {
+      // ダウンロード先フォルダを選択（直接Tauriコマンドを呼び出し）
+      const downloadPath = await invoke('select_directory');
+      if (!downloadPath) {
+        return; // ユーザーがキャンセル
+      }
+
+      // ファイル名を取得
+      const fileName = fileKey.split('/').pop() || fileKey;
+      const localPath = `${downloadPath}/${fileName}`;
+
+      handleRestoreSuccess(`ダウンロード開始: ${fileName}`);
+
+      // ファイルのストレージクラスに応じてダウンロード方法を選択
+      const fileObject = s3Objects.find(obj => obj.key === fileKey);
+      const awsConfig = getAwsConfigFromCredentials();
+      
+      let result;
+      if (fileObject && (fileObject.storage_class === 'STANDARD' || fileObject.storage_class === 'STANDARD_IA')) {
+        // Standard/Standard-IAファイルは直接ダウンロード
+        result = await TauriCommands.downloadS3File(fileKey, localPath, awsConfig);
+      } else {
+        // Deep Archive/Glacierファイルは復元済みファイルダウンロード
+        result = await TauriCommands.downloadRestoredFile(fileKey, localPath, awsConfig);
+      }
+
+      handleRestoreSuccess(`ダウンロード完了: ${fileName} → ${localPath}`);
+    } catch (err) {
+      console.error('ダウンロードエラー:', err);
+      handleRestoreError(`ダウンロードに失敗しました: ${err}`);
+    }
+  };
+
+  const handleRestoreRequest = async () => {
+    if (selectedFiles.length === 0) {
+      setRestoreError('復元するファイルを選択してください');
+      return;
+    }
+
+    try {
+      setRestoreError(null);
+      const awsConfig = getAwsConfigFromCredentials();
+      
+      // 選択されたファイルのオブジェクトを取得
+      const selectedObjects = s3Objects.filter(obj => selectedFiles.includes(obj.key));
+      
+      // ストレージクラス別に分類
+      const needsRestore = selectedObjects.filter(obj => 
+        obj.storage_class === 'DEEP_ARCHIVE' || obj.storage_class === 'GLACIER'
+      );
+      const noRestoreNeeded = selectedObjects.filter(obj => 
+        obj.storage_class === 'STANDARD' || obj.storage_class === 'STANDARD_IA'
+      );
+      
+      let successMessages: string[] = [];
+      
+      // 復元が必要なファイルの処理
+      for (const obj of needsRestore) {
+        const result = await TauriCommands.restoreFile(obj.key, awsConfig, restoreTier);
+        console.log(`復元リクエスト成功: ${obj.key} - ${result.restore_status}`);
+      }
+      
+      if (needsRestore.length > 0) {
+        successMessages.push(`${needsRestore.length}個のファイルの復元リクエストを送信しました（復元層: ${restoreTier}）`);
+      }
+      
+      if (noRestoreNeeded.length > 0) {
+        successMessages.push(`${noRestoreNeeded.length}個のファイルは既にアクセス可能です（復元不要）`);
+      }
+      
+      setRestoreSuccess(successMessages.join(' / '));
+      setSelectedFiles([]);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '復元リクエストに失敗しました';
+      setRestoreError(errorMessage);
+    }
+  };
+
 
 
 
@@ -919,7 +1360,12 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
           >
             ☁️ AWS S3設定
           </button>
-
+          <button 
+            className={`tab ${activeTab === 'restore' ? 'active' : ''}`}
+            onClick={() => setActiveTab('restore')}
+          >
+            📦 リストア
+          </button>
           <button 
             className={`tab ${activeTab === 'api_test' ? 'active' : ''}`}
             onClick={() => setActiveTab('api_test')}
@@ -1456,7 +1902,420 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
               </div>
             </div>
           )}
+          {activeTab === 'restore' && (
+            <div className="config-section">
+              <div className="restore-header-bar">
+                <h3>ファイル復元</h3>
+                <div className="header-buttons">
+                  <button
+                    onClick={loadS3Objects}
+                    disabled={isLoadingS3Objects || !config.user_preferences.default_bucket_name || !credentials.access_key_id}
+                    className="btn-primary load-objects-btn"
+                  >
+                    {isLoadingS3Objects ? '🔄 読み込み中...' : '📦 S3オブジェクト一覧を取得'}
+                  </button>
+                  <button
+                    onClick={checkRestoreStatus}
+                    disabled={s3Objects.length === 0}
+                    className="btn-secondary check-restore-btn"
+                  >
+                    🔍 復元状況確認
+                  </button>
+                </div>
+              </div>
+              
+              {restoreError && (
+                <div className="alert alert-error">
+                  <span>❌ {restoreError}</span>
+                  <button onClick={() => setRestoreError(null)}>×</button>
+                </div>
+              )}
 
+              {restoreSuccess && (
+                <div className="alert alert-success">
+                  <span>✅ {restoreSuccess}</span>
+                  <button onClick={() => setRestoreSuccess(null)}>×</button>
+                </div>
+              )}
+
+              {!config.user_preferences.default_bucket_name && (
+                <div className="info-card">
+                  <p>💡 復元機能を使用するには、まずAWS認証タブでバケットアクセステストを完了してください。</p>
+                </div>
+              )}
+
+              {config.user_preferences.default_bucket_name && !credentials.access_key_id && (
+                <div className="info-card">
+                  <p>💡 AWS認証情報が設定されていません。AWS認証タブで認証を行ってください。</p>
+                </div>
+              )}
+
+              {config.user_preferences.default_bucket_name && credentials.access_key_id && s3Objects.length > 0 && (
+                <div className="file-browser">
+                  {/* ファイルブラウザーツールバー */}
+                  <div className="file-browser-toolbar">
+                    <div className="selection-info">
+                      <span className="object-count">
+                        全ファイル: {s3Objects.length}個 | 
+                        Deep Archive: {s3Objects.filter(obj => obj.storage_class === 'DEEP_ARCHIVE').length}個
+                      </span>
+                      <span className="selection-count">
+                        {selectedFiles.length > 0 && `${selectedFiles.length}個選択中`}
+                      </span>
+                    </div>
+                    <div className="toolbar-controls">
+                      {/* グループ表示を常に有効化 */}
+                    </div>
+                  </div>
+
+                  {/* Finderライクなテーブル */}
+                  <div className="file-table-container">
+                    <table className="file-table">
+                      <thead>
+                        <tr>
+                          <th className="select-column">
+                            {/* グループ表示では全選択チェックボックス非表示 */}
+                          </th>
+                          <th 
+                            className={`sortable ${sortField === 'name' ? 'active' : ''}`}
+                            onClick={() => handleSort('name')}
+                          >
+                            名前 {sortField === 'name' && (sortDirection === 'asc' ? '↑' : '↓')}
+                          </th>
+                          <th 
+                            className={`sortable ${sortField === 'size' ? 'active' : ''}`}
+                            onClick={() => handleSort('size')}
+                          >
+                            サイズ {sortField === 'size' && (sortDirection === 'asc' ? '↑' : '↓')}
+                          </th>
+                          <th 
+                            className={`sortable ${sortField === 'type' ? 'active' : ''}`}
+                            onClick={() => handleSort('type')}
+                          >
+                            種類 {sortField === 'type' && (sortDirection === 'asc' ? '↑' : '↓')}
+                          </th>
+                          <th>
+                            復元状況
+                          </th>
+                          <th 
+                            className={`sortable ${sortField === 'modified' ? 'active' : ''}`}
+                            onClick={() => handleSort('modified')}
+                          >
+                            更新日時 {sortField === 'modified' && (sortDirection === 'asc' ? '↑' : '↓')}
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(() => {
+                          const groupedFiles = getGroupedFiles(s3Objects);
+                          const storageClassNames = {
+                            'DEEP_ARCHIVE': 'Deep Archive',
+                            'STANDARD_IA': 'Standard IA',
+                            'STANDARD': 'Standard'
+                          };
+
+                          // 常にストレージクラス別にグループ表示
+                          return Object.entries(groupedFiles).map(([storageClass, files]) => {
+                              const storageDisplayName = storageClassNames[storageClass as keyof typeof storageClassNames] || storageClass;
+                              const storageClassColor = storageClass === 'DEEP_ARCHIVE' ? '#f59e0b' : 
+                                                      storageClass === 'STANDARD' ? '#22c55e' :
+                                                      storageClass === 'STANDARD_IA' ? '#3b82f6' : '#888888';
+
+                                                              return [
+                                <tr key={`header-${storageClass}`} className="storage-group-header">
+                                  <td colSpan={6} style={{ color: storageClassColor }}>
+                                    <strong>
+                                      {storageDisplayName} ({files.length}個)
+                                      {storageClass === 'DEEP_ARCHIVE' && ' 🔒'}
+                                    </strong>
+                                  </td>
+                                </tr>,
+                                ...files.map((obj) => {
+                                  const fileName = obj.key.split('/').pop() || obj.key;
+                                  const folderPath = obj.key.split('/').slice(0, -1).join('/');
+                                  const fileExt = obj.key.split('.').pop()?.toLowerCase() || '';
+                                  const isSelected = selectedFiles.includes(obj.key);
+
+                                  return (
+                                    <tr 
+                                      key={obj.key} 
+                                      className={`file-row ${isSelected ? 'selected' : ''} ${obj.storage_class === 'DEEP_ARCHIVE' ? 'deep-archive-row' : ''}`}
+                                    >
+                                      <td className="select-column">
+                                        <input
+                                          type="checkbox"
+                                          checked={isSelected}
+                                          disabled={false}
+                                          onChange={(e) => {
+                                            if (e.target.checked) {
+                                              setSelectedFiles(prev => [...prev, obj.key]);
+                                            } else {
+                                              setSelectedFiles(prev => prev.filter(key => key !== obj.key));
+                                            }
+                                          }}
+                                        />
+                                      </td>
+                                      <td className="name-column">
+                                        <div className="file-name-container">
+                                          <span className="file-icon">
+                                            {['png', 'jpg', 'jpeg', 'gif', 'svg'].includes(fileExt) ? '🖼️' :
+                                             ['mp4', 'avi', 'mov', 'mkv'].includes(fileExt) ? '🎬' :
+                                             ['pdf'].includes(fileExt) ? '📄' :
+                                             ['zip', 'rar', '7z'].includes(fileExt) ? '📦' :
+                                             '📁'}
+                                          </span>
+                                          <div className="name-info">
+                                            <div className="file-name">
+                                              {fileName}
+                                              {storageWarnings[obj.key] && (
+                                                <span 
+                                                  className="warning-icon" 
+                                                  title={`⚠️ ${storageWarnings[obj.key].message}${storageWarnings[obj.key].fee ? ` | 早期削除手数料: $${storageWarnings[obj.key].fee?.toFixed(3)}` : ''}`}
+                                                >
+                                                  ⚠️
+                                                </span>
+                                              )}
+                                            </div>
+                                            {folderPath && <div className="folder-path">{folderPath}/</div>}
+                                          </div>
+                                        </div>
+                                      </td>
+                                      <td className="size-column">
+                                        {obj.size < 1024 ? `${obj.size} B` :
+                                         obj.size < 1024 * 1024 ? `${(obj.size / 1024).toFixed(1)} KB` :
+                                         obj.size < 1024 * 1024 * 1024 ? `${(obj.size / 1024 / 1024).toFixed(1)} MB` :
+                                         `${(obj.size / 1024 / 1024 / 1024).toFixed(1)} GB`}
+                                      </td>
+                                      <td className="type-column">
+                                        {fileExt ? fileExt.toUpperCase() : '—'}
+                                      </td>
+                                      <td className="restore-status-column">
+                                        {restoreStatus[obj.key] ? (
+                                          <div className="restore-status-container">
+                                            <span className={`restore-status ${restoreStatus[obj.key].status}`}>
+                                              {restoreStatus[obj.key].status === 'completed' ? '✅ 復元完了' :
+                                               restoreStatus[obj.key].status === 'in-progress' ? '🔄 復元中' :
+                                               restoreStatus[obj.key].status === 'failed' ? '❌ 復元失敗' :
+                                               '—'}
+                                              {restoreStatus[obj.key].expiry && (
+                                                <div className="restore-expiry">
+                                                  期限: {new Date(restoreStatus[obj.key].expiry!).toLocaleString('ja-JP')}
+                                                </div>
+                                              )}
+                                            </span>
+                                            {restoreStatus[obj.key].status === 'completed' && (
+                                              <button 
+                                                className="download-btn"
+                                                onClick={() => handleDownload(obj.key)}
+                                                title="ファイルをダウンロード"
+                                              >
+                                                📥
+                                              </button>
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <div className="restore-status-container">
+                                            {obj.storage_class === 'STANDARD' || obj.storage_class === 'STANDARD_IA' ? (
+                                              <button 
+                                                className="download-btn primary"
+                                                onClick={() => handleDownload(obj.key)}
+                                                title="ファイルをダウンロード"
+                                              >
+                                                💾 ダウンロード
+                                              </button>
+                                            ) : '—'}
+                                          </div>
+                                        )}
+                                      </td>
+                                      <td className="modified-column">
+                                        {new Date(obj.last_modified).toLocaleString('ja-JP')}
+                                      </td>
+                                    </tr>
+                                  );
+                                })
+                              ].flat();
+                            }).flat();
+                        })()}
+                      </tbody>
+                    </table>
+                    
+                    {s3Objects.length === 0 && (
+                      <div className="empty-state">
+                        <p>ファイルが見つかりませんでした。</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 復元アクションエリア */}
+                  {selectedFiles.length > 0 && (
+                    <div className="restore-action-area">
+                      {/* 手数料情報表示エリア */}
+                      {(() => {
+                        const selectedObjects = s3Objects.filter(obj => selectedFiles.includes(obj.key));
+                        const hasEarlyDeletionWarnings = selectedFiles.some(key => storageWarnings[key]);
+                        const needsRestoreFiles = selectedObjects.filter(obj => 
+                          obj.storage_class === 'DEEP_ARCHIVE' || obj.storage_class === 'GLACIER'
+                        );
+                        const restoreFees = calculateRestoreFees(selectedObjects, restoreTier);
+                        
+                        // 手数料情報を表示する条件：早期削除警告がある または 復元が必要なファイルがある
+                        const shouldShowFeeInfo = hasEarlyDeletionWarnings || (needsRestoreFiles.length > 0 && restoreFees.total > 0);
+                        
+                        if (!shouldShowFeeInfo) return null;
+                        
+                        return (
+                          <div className="warning-card">
+                            <h4>💰 手数料に関する情報</h4>
+                            
+                            {/* 早期削除手数料警告 */}
+                            {hasEarlyDeletionWarnings && (
+                              <div>
+                                <h5>⚠️ 早期削除手数料</h5>
+                                <ul>
+                                  {selectedFiles
+                                    .filter(key => storageWarnings[key])
+                                    .map(key => (
+                                      <li key={key}>
+                                        <strong>{key.split('/').pop()}</strong>: {storageWarnings[key].message}
+                                        {storageWarnings[key].fee && (
+                                          <span className="fee-warning"> (手数料: ${storageWarnings[key].fee?.toFixed(3)})</span>
+                                        )}
+                                      </li>
+                                    ))}
+                                </ul>
+                              </div>
+                            )}
+                            
+                            {/* 復元手数料情報 */}
+                            {needsRestoreFiles.length > 0 && restoreFees.total > 0 && (
+                              <div style={{ marginTop: hasEarlyDeletionWarnings ? '12px' : '0' }}>
+                                <h5>🔄 復元手数料</h5>
+                                <p><strong>復元速度: {restoreTier}</strong></p>
+                                <ul>
+                                  {needsRestoreFiles.map(obj => (
+                                    <li key={obj.key}>
+                                      <strong>{obj.key.split('/').pop()}</strong> ({obj.storage_class}): 
+                                      <span className="fee-info"> ${restoreFees.breakdown[obj.key]?.toFixed(6) || '0.000000'}</span>
+                                      {restoreFees.breakdown[obj.key] && restoreFees.breakdown[obj.key] < 0.001 && (
+                                        <span style={{ color: '#10b981', fontSize: '12px' }}> (≈無料)</span>
+                                      )}
+                                    </li>
+                                  ))}
+                                </ul>
+                                <p><strong>復元手数料合計: <span className="fee-total">${restoreFees.total.toFixed(3)}</span></strong></p>
+                              </div>
+                            )}
+                            
+                            {/* 混在選択時の説明 */}
+                            {(() => {
+                              const standardFiles = selectedObjects.filter(obj => 
+                                obj.storage_class === 'STANDARD' || obj.storage_class === 'STANDARD_IA'
+                              );
+                              
+                              if (needsRestoreFiles.length > 0 && standardFiles.length > 0) {
+                                return (
+                                  <div style={{ marginTop: '12px', padding: '8px', backgroundColor: '#1e293b', borderRadius: '4px' }}>
+                                    <p style={{ margin: 0, fontSize: '14px', color: '#94a3b8' }}>
+                                      📋 選択中: 復元対象 {needsRestoreFiles.length}個 / 即座アクセス可能 {standardFiles.length}個
+                                    </p>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
+                            
+                            <p className="warning-note">
+                              {hasEarlyDeletionWarnings && needsRestoreFiles.length > 0 ? 
+                                '復元を続行すると上記の手数料が発生する可能性があります。' :
+                                hasEarlyDeletionWarnings ? 
+                                '早期削除により上記の手数料が発生する可能性があります。' :
+                                '復元により上記の手数料が発生します。'
+                              }
+                            </p>
+                          </div>
+                        );
+                      })()}
+                      
+                      {/* Standardファイルのみ選択時の情報 */}
+                      {(() => {
+                        const selectedObjects = s3Objects.filter(obj => selectedFiles.includes(obj.key));
+                        const standardFiles = selectedObjects.filter(obj => 
+                          obj.storage_class === 'STANDARD' || obj.storage_class === 'STANDARD_IA'
+                        );
+                        const needsRestoreFiles = selectedObjects.filter(obj => 
+                          obj.storage_class === 'DEEP_ARCHIVE' || obj.storage_class === 'GLACIER'
+                        );
+                        const hasEarlyDeletionWarnings = selectedFiles.some(key => storageWarnings[key]);
+                        
+                        // Standardファイルのみ選択されている場合（手数料警告がない場合のみ）
+                        if (standardFiles.length > 0 && needsRestoreFiles.length === 0 && !hasEarlyDeletionWarnings) {
+                          return (
+                            <div className="info-card" style={{ marginBottom: '16px' }}>
+                              <p style={{ margin: 0, color: '#10b981' }}>
+                                ✅ 選択されたファイル ({standardFiles.length}個) は既にアクセス可能です。復元処理は不要です。
+                              </p>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+                      <div className="restore-settings">
+                        <label>復元速度:</label>
+                        <select 
+                          value={restoreTier} 
+                          onChange={(e) => setRestoreTier(e.target.value as 'Expedited' | 'Standard' | 'Bulk')}
+                          className="restore-tier-select"
+                        >
+                          <option value="Expedited">Expedited (1-5分、高コスト)</option>
+                          <option value="Standard">Standard (3-5時間、標準コスト)</option>
+                          <option value="Bulk">Bulk (5-12時間、低コスト)</option>
+                        </select>
+                      </div>
+                      
+                      <div className="action-buttons">
+                        <button
+                          onClick={handleRestoreRequest}
+                          className="btn-success"
+                        >
+                          {(() => {
+                            const selectedObjects = s3Objects.filter(obj => selectedFiles.includes(obj.key));
+                            const needsRestore = selectedObjects.filter(obj => 
+                              obj.storage_class === 'DEEP_ARCHIVE' || obj.storage_class === 'GLACIER'
+                            ).length;
+                            const alreadyAccessible = selectedFiles.length - needsRestore;
+                            
+                            if (needsRestore > 0 && alreadyAccessible > 0) {
+                              return `🔄 復元実行 (復元対象: ${needsRestore}個 / アクセス可能: ${alreadyAccessible}個)`;
+                            } else if (needsRestore > 0) {
+                              return `🔄 復元実行 (${needsRestore}個)`;
+                            } else {
+                              return `✅ ファイル確認 (${selectedFiles.length}個は既にアクセス可能)`;
+                            }
+                          })()}
+                        </button>
+                        
+                        <button
+                          onClick={() => {
+                            selectedFiles.forEach(fileKey => handleDownload(fileKey));
+                          }}
+                          className="btn-primary"
+                          style={{ marginLeft: '12px' }}
+                        >
+                          💾 ダウンロード ({selectedFiles.length}個)
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {s3Objects.length === 0 && !isLoadingS3Objects && config.user_preferences.default_bucket_name && credentials.access_key_id && (
+                <div className="empty-state">
+                  <p>S3オブジェクトが見つかりません。上記のボタンでオブジェクト一覧を取得してください。</p>
+                </div>
+              )}
+            </div>
+          )}
           {activeTab === 'api_test' && (
             <div className="api-test-container">
               <div className="section">

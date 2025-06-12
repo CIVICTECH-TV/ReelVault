@@ -33,6 +33,7 @@ pub fn run() {
 
   tauri::Builder::default()
     .plugin(tauri_plugin_shell::init())
+    .plugin(tauri_plugin_dialog::init())
     .manage(app_state)
     .manage(upload_queue)
     .invoke_handler(tauri::generate_handler![
@@ -40,6 +41,7 @@ pub fn run() {
         // ファイル操作API
         list_files,
         get_file_info,
+        select_directory,
         watch_directory,
         test_watch_system,
         get_sample_watch_configs,
@@ -50,7 +52,8 @@ pub fn run() {
         restore_file,
         check_restore_status,
         get_restore_notifications,
-        download_restored_file,
+        download_s3_file,
+    download_restored_file,
         list_restore_jobs,
         cancel_restore_job,
         clear_restore_history,

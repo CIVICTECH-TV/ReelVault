@@ -5,6 +5,28 @@ alwaysApply: true
 ---
 # ReelVault プロジェクト Cursor ルール
 
+## プロジェクト情報
+
+### リポジトリ設定
+- **組織**: CIVICTECH-TV
+- **リポジトリ**: ReelVault
+- **URL**: https://github.com/CIVICTECH-TV/ReelVault
+- **デフォルトブランチ**: main
+
+### GitHub Projects
+- **プロジェクト名**: ReelVault Development
+- **プロジェクトID**: PVT_kwDODIBDzM4A7Mog
+- **番号**: #5
+- **所有者**: CIVICTECH-TV組織
+- **リンク**: GitHub Projects内でIssue管理・進捗追跡
+
+### Issue管理設定
+- **Epic構造**: Epic → Story/Task の階層管理
+- **ラベル戦略**: `epic`, `story`, `task` + 技術ラベル
+- **マイルストーン**: Phase 1, Phase 2... でフェーズ管理
+- **プロジェクト連携**: 全IssueをReelVault Developmentプロジェクトに関連付け
+- **関係性管理**: Epic内Tasklist + 子Issue相互参照コメント
+
 ## 基本方針
 - 常に日本語で回答する
 - GitHub Issues管理とプロジェクト運営のベストプラクティスに従う

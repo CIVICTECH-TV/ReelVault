@@ -228,6 +228,22 @@ async fn queue_auto_upload(file_path: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
+/// ディレクトリ選択ダイアログを開く
+#[command]
+pub async fn select_directory(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    
+    let result = app.dialog().file().blocking_pick_folder();
+    
+    match result {
+        Some(path) => {
+            // FilePath型を文字列に変換
+            Ok(Some(path.to_string()))
+        },
+        None => Ok(None), // ユーザーがキャンセル
+    }
+}
+
 /// ディレクトリ内のファイル一覧を取得
 #[command]
 pub async fn list_files(directory: String) -> Result<Vec<FileInfo>, String> {

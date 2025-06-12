@@ -187,41 +187,67 @@ pub async fn list_s3_objects(
     config: AwsConfig,
     prefix: Option<String>,
 ) -> Result<Vec<S3Object>, String> {
-    // TODO: AWS SDK for Rustを使った実装に置き換える
-    // let aws_config = aws_config::load_from_env().await;
-    // let s3_client = aws_sdk_s3::Client::new(&aws_config);
-    // 
-    // let mut request = s3_client.list_objects_v2().bucket(&config.bucket_name);
-    // if let Some(prefix) = prefix {
-    //     request = request.prefix(prefix);
-    // }
-    // 
-    // let result = request.send().await.map_err(|e| e.to_string())?;
+    use aws_sdk_s3::config::{Credentials, Region};
+    use aws_sdk_s3::Config;
     
     log::info!("S3 object list requested for bucket: {}", config.bucket_name);
     if let Some(ref prefix) = prefix {
         log::info!("With prefix: {}", prefix);
     }
+
+    // AWS認証情報を設定
+    let credentials = Credentials::new(
+        &config.access_key_id,
+        &config.secret_access_key,
+        None, // session_token
+        None, // expiration
+        "ReelVault"
+    );
+
+    // AWS設定を構築
+    let aws_config = Config::builder()
+        .region(Region::new(config.region.clone()))
+        .credentials_provider(credentials)
+        .build();
+
+    let s3_client = aws_sdk_s3::Client::from_conf(aws_config);
     
-    // モックデータを返す
-    let mock_objects = vec![
-        S3Object {
-            key: "videos/project1/final.mp4".to_string(),
-            size: 1024 * 1024 * 100, // 100MB
-            last_modified: "2024-01-15T10:30:00Z".to_string(),
-            storage_class: "DEEP_ARCHIVE".to_string(),
-            etag: "\"abc123def456\"".to_string(),
-        },
-        S3Object {
-            key: "videos/project2/raw_footage.mov".to_string(),
-            size: 1024 * 1024 * 500, // 500MB
-            last_modified: "2024-01-10T14:20:00Z".to_string(),
-            storage_class: "DEEP_ARCHIVE".to_string(),
-            etag: "\"def456ghi789\"".to_string(),
-        },
-    ];
+    // ListObjectsV2 リクエストを構築
+    let mut request = s3_client.list_objects_v2().bucket(&config.bucket_name);
+    if let Some(prefix) = prefix {
+        request = request.prefix(prefix);
+    }
     
-    Ok(mock_objects)
+    // S3 APIを実行
+    let result = request.send().await.map_err(|e| {
+        log::error!("S3 list objects failed: {}", e);
+        format!("S3オブジェクト一覧の取得に失敗しました: {}", e)
+    })?;
+    
+    // レスポンスをS3Object構造体に変換
+    let mut objects = Vec::new();
+    for object in result.contents() {
+        if let (Some(key), Some(size), Some(last_modified)) = (
+            object.key(),
+            object.size(),
+            object.last_modified()
+        ) {
+            objects.push(S3Object {
+                key: key.to_string(),
+                size: size as u64,
+                last_modified: last_modified.to_string(),
+                storage_class: object.storage_class()
+                    .map(|sc| sc.as_str().to_string())
+                    .unwrap_or_else(|| "STANDARD".to_string()),
+                etag: object.e_tag()
+                    .map(|etag| etag.to_string())
+                    .unwrap_or_else(|| "".to_string()),
+            });
+        }
+    }
+    
+    log::info!("Retrieved {} objects from S3 bucket: {}", objects.len(), config.bucket_name);
+    Ok(objects)
 }
 
 /// Deep Archiveからファイルを復元する
@@ -361,6 +387,74 @@ pub async fn get_restore_notifications() -> Result<Vec<RestoreNotification>, Str
     }
     
     Ok(notifications)
+}
+
+/// 通常のS3ファイルをダウンロードする（復元不要）
+#[command]
+pub async fn download_s3_file(
+    s3_key: String,
+    local_path: String,
+    config: AwsConfig,
+) -> Result<DownloadProgress, String> {
+    use std::path::Path;
+    
+    // ローカルパスの検証
+    let path = Path::new(&local_path);
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                format!("Failed to create directory {}: {}", parent.display(), e)
+            })?;
+        }
+    }
+    
+    // AWS SDK for Rustを使った実際のダウンロード実装
+    let credentials = aws_sdk_s3::config::Credentials::new(
+        &config.access_key_id,
+        &config.secret_access_key,
+        None, // session_token
+        None, // expiry
+        "ReelVault",
+    );
+    
+    let aws_config = aws_sdk_s3::Config::builder()
+        .credentials_provider(credentials)
+        .region(aws_sdk_s3::config::Region::new(config.region.clone()))
+        .build();
+    
+    let s3_client = aws_sdk_s3::Client::from_conf(aws_config);
+    
+    log::info!("Standard download requested: s3://{}/{} -> {}", 
+               config.bucket_name, s3_key, local_path);
+    
+    let result = s3_client
+        .get_object()
+        .bucket(&config.bucket_name)
+        .key(&s3_key)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to download from S3: {}", e))?;
+    
+    // レスポンスボディを取得
+    let data = result.body.collect().await
+        .map_err(|e| format!("Failed to read S3 response body: {}", e))?;
+    
+    // ローカルファイルに書き込み
+    std::fs::write(&local_path, data.into_bytes())
+        .map_err(|e| format!("Failed to write file {}: {}", local_path, e))?;
+    
+    let total_bytes = std::fs::metadata(&local_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+    
+    Ok(DownloadProgress {
+        key: s3_key,
+        downloaded_bytes: total_bytes,
+        total_bytes,
+        percentage: 100.0,
+        status: "completed".to_string(),
+        local_path: Some(local_path),
+    })
 }
 
 /// 復元されたファイルをダウンロードする

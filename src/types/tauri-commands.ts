@@ -464,6 +464,9 @@ export const TauriCommands = {
   getRestoreNotifications: (): Promise<RestoreNotification[]> =>
     invoke('get_restore_notifications'),
   
+  downloadS3File: (s3Key: string, localPath: string, config: AwsConfig): Promise<DownloadProgress> =>
+    invoke('download_s3_file', { s3Key, localPath, config }),
+  
   downloadRestoredFile: (s3Key: string, localPath: string, config: AwsConfig): Promise<DownloadProgress> =>
     invoke('download_restored_file', { s3Key, localPath, config }),
   
