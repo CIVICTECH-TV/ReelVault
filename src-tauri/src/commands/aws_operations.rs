@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 use tauri::command;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 /// AWS接続設定
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct AwsConfig {
     pub access_key_id: String,
     pub secret_access_key: String,
@@ -38,12 +40,50 @@ pub struct UploadProgress {
 }
 
 /// ファイル復元情報
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct RestoreInfo {
     pub key: String,
-    pub restore_status: String,
+    pub restore_status: String, // "in-progress", "completed", "failed"
     pub expiry_date: Option<String>,
     pub tier: String, // Standard, Expedited, Bulk
+    pub request_time: String,
+    pub completion_time: Option<String>,
+}
+
+/// 復元状況監視結果
+#[derive(Debug, Serialize)]
+pub struct RestoreStatusResult {
+    pub key: String,
+    pub is_restored: bool,
+    pub restore_status: String,
+    pub expiry_date: Option<String>,
+    pub error_message: Option<String>,
+}
+
+/// ダウンロード進捗情報
+#[derive(Debug, Serialize)]
+pub struct DownloadProgress {
+    pub key: String,
+    pub downloaded_bytes: u64,
+    pub total_bytes: u64,
+    pub percentage: f64,
+    pub status: String, // "downloading", "completed", "failed"
+    pub local_path: Option<String>,
+}
+
+/// 復元通知情報
+#[derive(Debug, Serialize)]
+pub struct RestoreNotification {
+    pub key: String,
+    pub status: String, // "completed", "failed", "expired"
+    pub message: String,
+    pub timestamp: String,
+}
+
+// グローバルな復元状況管理
+lazy_static::lazy_static! {
+    static ref RESTORE_TRACKER: Arc<Mutex<HashMap<String, RestoreInfo>>> = 
+        Arc::new(Mutex::new(HashMap::new()));
 }
 
 /// AWS接続をテストする
@@ -222,10 +262,201 @@ pub async fn restore_file(
     log::info!("Restore requested for: s3://{}/{}", config.bucket_name, s3_key);
     log::info!("Restore tier: {}", tier);
     
-    Ok(RestoreInfo {
-        key: s3_key,
+    let restore_info = RestoreInfo {
+        key: s3_key.clone(),
         restore_status: "in-progress".to_string(),
         expiry_date: Some("2024-01-22T00:00:00Z".to_string()),
-        tier,
+        tier: tier.clone(),
+        request_time: chrono::Utc::now().to_rfc3339(),
+        completion_time: None,
+    };
+    
+    // 復元状況をトラッカーに追加
+    {
+        let mut tracker = RESTORE_TRACKER.lock().unwrap();
+        tracker.insert(s3_key, restore_info.clone());
+    }
+    
+    Ok(restore_info)
+}
+
+/// 復元状況を監視する
+#[command]
+pub async fn check_restore_status(
+    s3_key: String,
+    config: AwsConfig,
+) -> Result<RestoreStatusResult, String> {
+    // TODO: AWS SDK for Rustを使った実際の復元状況確認
+    // let aws_config = aws_config::load_from_env().await;
+    // let s3_client = aws_sdk_s3::Client::new(&aws_config);
+    // 
+    // let result = s3_client
+    //     .head_object()
+    //     .bucket(&config.bucket_name)
+    //     .key(&s3_key)
+    //     .send()
+    //     .await
+    //     .map_err(|e| e.to_string())?;
+    // 
+    // let is_restored = result.restore().is_some();
+    // let restore_status = if is_restored { "completed" } else { "in-progress" };
+    
+    log::info!("Checking restore status for: s3://{}/{}", config.bucket_name, s3_key);
+    
+    // モック実装：復元状況をシミュレート
+    let mut tracker = RESTORE_TRACKER.lock().unwrap();
+    if let Some(restore_info) = tracker.get_mut(&s3_key) {
+        // 簡単なシミュレーション：リクエストから5分後に完了とする
+        let request_time = chrono::DateTime::parse_from_rfc3339(&restore_info.request_time)
+            .map_err(|e| e.to_string())?;
+        let now = chrono::Utc::now();
+        let elapsed = now.signed_duration_since(request_time.with_timezone(&chrono::Utc));
+        
+        if elapsed.num_minutes() >= 5 && restore_info.restore_status == "in-progress" {
+            restore_info.restore_status = "completed".to_string();
+            restore_info.completion_time = Some(now.to_rfc3339());
+        }
+        
+        Ok(RestoreStatusResult {
+            key: s3_key,
+            is_restored: restore_info.restore_status == "completed",
+            restore_status: restore_info.restore_status.clone(),
+            expiry_date: restore_info.expiry_date.clone(),
+            error_message: None,
+        })
+    } else {
+        Ok(RestoreStatusResult {
+            key: s3_key,
+            is_restored: false,
+            restore_status: "not-found".to_string(),
+            expiry_date: None,
+            error_message: Some("Restore request not found".to_string()),
+        })
+    }
+}
+
+/// 復元完了通知を取得する
+#[command]
+pub async fn get_restore_notifications() -> Result<Vec<RestoreNotification>, String> {
+    let tracker = RESTORE_TRACKER.lock().unwrap();
+    let mut notifications = Vec::new();
+    
+    for (key, restore_info) in tracker.iter() {
+        if restore_info.restore_status == "completed" {
+            notifications.push(RestoreNotification {
+                key: key.clone(),
+                status: "completed".to_string(),
+                message: format!("File {} is ready for download", key),
+                timestamp: restore_info.completion_time.clone()
+                    .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+            });
+        } else if restore_info.restore_status == "failed" {
+            notifications.push(RestoreNotification {
+                key: key.clone(),
+                status: "failed".to_string(),
+                message: format!("Restore failed for file {}", key),
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            });
+        }
+    }
+    
+    Ok(notifications)
+}
+
+/// 復元されたファイルをダウンロードする
+#[command]
+pub async fn download_restored_file(
+    s3_key: String,
+    local_path: String,
+    config: AwsConfig,
+) -> Result<DownloadProgress, String> {
+    use std::path::Path;
+    
+    // ローカルパスの検証
+    let path = Path::new(&local_path);
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                format!("Failed to create directory {}: {}", parent.display(), e)
+            })?;
+        }
+    }
+    
+    // 復元状況の確認
+    let status_result = check_restore_status(s3_key.clone(), config.clone()).await?;
+    if !status_result.is_restored {
+        return Err(format!("File {} is not yet restored. Status: {}", 
+                          s3_key, status_result.restore_status));
+    }
+    
+    // TODO: AWS SDK for Rustを使った実際のダウンロード実装
+    // let aws_config = aws_config::load_from_env().await;
+    // let s3_client = aws_sdk_s3::Client::new(&aws_config);
+    // 
+    // let result = s3_client
+    //     .get_object()
+    //     .bucket(&config.bucket_name)
+    //     .key(&s3_key)
+    //     .send()
+    //     .await
+    //     .map_err(|e| e.to_string())?;
+    // 
+    // let mut file = tokio::fs::File::create(&local_path).await
+    //     .map_err(|e| e.to_string())?;
+    // 
+    // let mut stream = result.body.into_async_read();
+    // tokio::io::copy(&mut stream, &mut file).await
+    //     .map_err(|e| e.to_string())?;
+    
+    log::info!("Download requested: s3://{}/{} -> {}", 
+               config.bucket_name, s3_key, local_path);
+    
+    // モック実装：ダウンロード進捗をシミュレート
+    let total_bytes = 1024 * 1024 * 100; // 100MB
+    
+    Ok(DownloadProgress {
+        key: s3_key,
+        downloaded_bytes: total_bytes,
+        total_bytes,
+        percentage: 100.0,
+        status: "completed".to_string(),
+        local_path: Some(local_path),
     })
+}
+
+/// 復元中のファイル一覧を取得する
+#[command]
+pub async fn list_restore_jobs() -> Result<Vec<RestoreInfo>, String> {
+    let tracker = RESTORE_TRACKER.lock().unwrap();
+    let restore_jobs: Vec<RestoreInfo> = tracker.values().cloned().collect();
+    Ok(restore_jobs)
+}
+
+/// 復元ジョブをキャンセルする（可能な場合）
+#[command]
+pub async fn cancel_restore_job(s3_key: String) -> Result<bool, String> {
+    let mut tracker = RESTORE_TRACKER.lock().unwrap();
+    
+    if let Some(restore_info) = tracker.get_mut(&s3_key) {
+        if restore_info.restore_status == "in-progress" {
+            restore_info.restore_status = "cancelled".to_string();
+            log::info!("Restore job cancelled for: {}", s3_key);
+            Ok(true)
+        } else {
+            Err(format!("Cannot cancel restore job for {}. Current status: {}", 
+                       s3_key, restore_info.restore_status))
+        }
+    } else {
+        Err(format!("Restore job not found for: {}", s3_key))
+    }
+}
+
+/// 復元ジョブの履歴をクリアする
+#[command]
+pub async fn clear_restore_history() -> Result<usize, String> {
+    let mut tracker = RESTORE_TRACKER.lock().unwrap();
+    let count = tracker.len();
+    tracker.clear();
+    log::info!("Cleared {} restore job(s) from history", count);
+    Ok(count)
 } 

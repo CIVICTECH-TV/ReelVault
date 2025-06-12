@@ -52,9 +52,38 @@ export interface UploadProgress {
 
 export interface RestoreInfo {
   key: string;
+  restore_status: string; // "in-progress", "completed", "failed", "cancelled"
+  expiry_date?: string;
+  tier: string; // "Standard", "Expedited", "Bulk"
+  request_time: string;
+  completion_time?: string;
+}
+
+// 復元状況監視結果
+export interface RestoreStatusResult {
+  key: string;
+  is_restored: boolean;
   restore_status: string;
   expiry_date?: string;
-  tier: string;
+  error_message?: string;
+}
+
+// ダウンロード進捗情報
+export interface DownloadProgress {
+  key: string;
+  downloaded_bytes: number;
+  total_bytes: number;
+  percentage: number;
+  status: string; // "downloading", "completed", "failed"
+  local_path?: string;
+}
+
+// 復元通知情報
+export interface RestoreNotification {
+  key: string;
+  status: string; // "completed", "failed", "expired"
+  message: string;
+  timestamp: string;
 }
 
 // ===== AWS認証API関連の型定義 =====
@@ -398,5 +427,24 @@ export const TauriCommands = {
   
   testUploadConfig: (config: UploadConfig): Promise<string> =>
     invoke('test_upload_config', { config }),
+
+  // 復元機能API
+  checkRestoreStatus: (s3Key: string, config: AwsConfig): Promise<RestoreStatusResult> =>
+    invoke('check_restore_status', { s3Key, config }),
   
+  getRestoreNotifications: (): Promise<RestoreNotification[]> =>
+    invoke('get_restore_notifications'),
+  
+  downloadRestoredFile: (s3Key: string, localPath: string, config: AwsConfig): Promise<DownloadProgress> =>
+    invoke('download_restored_file', { s3Key, localPath, config }),
+  
+  listRestoreJobs: (): Promise<RestoreInfo[]> =>
+    invoke('list_restore_jobs'),
+  
+  cancelRestoreJob: (s3Key: string): Promise<string> =>
+    invoke('cancel_restore_job', { s3Key }),
+  
+  clearRestoreHistory: (): Promise<string> =>
+    invoke('clear_restore_history'),
+
 }; 
