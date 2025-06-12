@@ -41,3 +41,7 @@ tokio = { version = "1.0", features = ["full"] }
 ring = "0.17"           # 暗号化ライブラリ
 base64 = "0.22"         # Base64エンコーディング
 keyring = "2.3"         # OS キーチェーン統合（macOS Keychain等）
+
+# ファイル監視・非同期処理
+notify = "6.0"          # ファイルシステム監視
+crossbeam-channel = "0.5"  # 非同期チャンネル通信
