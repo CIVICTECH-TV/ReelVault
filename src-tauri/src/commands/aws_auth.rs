@@ -234,19 +234,3 @@ pub async fn load_aws_credentials_secure(profile_name: String) -> Result<AwsCred
     Ok(credentials)
 }
 
-/// 保存されたAWS認証情報を削除する
-#[command]
-pub async fn delete_aws_credentials_secure(profile_name: String) -> Result<String, String> {
-    use keyring::Entry;
-
-    let service_name = "ReelVault-AWS";
-    let entry = Entry::new(&service_name, &profile_name)
-        .map_err(|e| format!("Failed to create keyring entry: {}", e))?;
-
-    // Keychainから削除
-    entry.delete_password()
-        .map_err(|e| format!("Failed to delete credentials from keychain: {}", e))?;
-
-    log::info!("AWS credentials deleted securely for profile: {}", profile_name);
-    Ok("Credentials deleted successfully".to_string())
-} 
