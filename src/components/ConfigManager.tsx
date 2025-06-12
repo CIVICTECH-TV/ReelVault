@@ -44,6 +44,9 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
   // API Test State
   const [testResults, setTestResults] = useState<string[]>([]);
 
+  // 開発者モード（隠しAPIテストメニュー用）
+  const [isDeveloperMode, setIsDeveloperMode] = useState(false);
+
   // --- AWS Auth State ---
   const [credentials, setCredentials] = useState<AwsCredentials>({
     access_key_id: '',

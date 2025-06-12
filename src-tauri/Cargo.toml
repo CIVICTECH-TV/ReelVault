@@ -45,3 +45,11 @@ keyring = "2.3"         # OS キーチェーン統合（macOS Keychain等）
 # ファイル監視・非同期処理
 notify = "6.0"          # ファイルシステム監視
 crossbeam-channel = "0.5"  # 非同期チャンネル通信
+
+# メタデータ管理・データベース
+rusqlite = { version = "0.30", features = ["bundled"] }  # SQLiteデータベース
+sha2 = "0.10"           # ファイルハッシュ計算
+ffprobe = "0.4"         # 動画メタデータ抽出
+
+[dev-dependencies]
+tempfile = "3.8"        # テスト用一時ファイル
