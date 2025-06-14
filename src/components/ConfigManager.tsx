@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { 
   TauriCommands, 
@@ -16,8 +16,15 @@ import {
 import { AWS_REGIONS, DEFAULT_REGION } from '../constants/aws-regions';
 // RestoreManagerは直接統合済み
 import { UploadManager } from './UploadManager';
-import { debugLog, isDev, debugError, debugInfo } from '../utils/debug';
+import { debugLog, isDev, debugError } from '../utils/debug';
 import './ConfigManager.css';
+
+// アイコンのインポート
+import statusIcon from '../assets/icons/status.svg';
+import settingsIcon from '../assets/icons/settings.svg';
+import backupIcon from '../assets/icons/backup.svg';
+import restoreIcon from '../assets/icons/restore.svg';
+import apiTestIcon from '../assets/icons/api-test.svg';
 
 interface ConfigManagerProps {
   initialConfig: AppConfig;
@@ -28,16 +35,20 @@ interface ConfigManagerProps {
   onHealthStatusChange?: (status: { isHealthy: boolean; lastCheck: Date | null; bucketName: string | undefined }) => void;
 }
 
-type ActiveTab = 'status' | 'api_test' | 'auth' | 'app' | 'aws_settings' | 'restore' | 'upload';
+export interface ConfigManagerRef {
+  openSettingsTab: () => void;
+}
 
-export const ConfigManager: React.FC<ConfigManagerProps> = ({ 
+type ActiveTab = 'status' | 'api_test' | 'auth' | 'restore' | 'upload';
+
+export const ConfigManager = forwardRef<ConfigManagerRef, ConfigManagerProps>(({ 
   initialConfig,
   initialState,
   onConfigChange, 
   onStateChange,
   onAuthSuccess,
   onHealthStatusChange
-}) => {
+}, ref) => {
   const [config, setConfig] = useState<AppConfig>(initialConfig);
   const [appState, setAppState] = useState<AppState>(initialState);
 
@@ -99,6 +110,14 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
   // グループ表示は常に有効（固定）
   const [storageWarnings, setStorageWarnings] = useState<{ [key: string]: { type: string; message: string; fee?: number } }>({});
   const [restoreStatus, setRestoreStatus] = useState<{ [key: string]: { status: string; expiry?: string; progress?: string } }>({});
+
+  // システムトレイから呼び出される設定タブを開く機能を公開
+  useImperativeHandle(ref, () => ({
+    openSettingsTab: () => {
+      console.log('設定タブを開きます');
+      setActiveTab('auth');
+    }
+  }));
 
   useEffect(() => {
     debugLog('初期設定更新:', initialConfig); // デバッグ用ログ
@@ -320,120 +339,9 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
 
 
 
-  // 設定エクスポート
-  const exportConfig = async () => {
-    try {
-      const exportPath = await TauriCommands.exportConfig();
-      setSuccess(`設定をエクスポートしました: ${exportPath}`);
-      setTimeout(() => setSuccess(null), 5000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '設定のエクスポートに失敗しました');
-    }
-  };
 
-  // 設定インポート（ファイル内容直接読み取り）
-  const importConfig = async () => {
-    try {
-      console.log('インポートボタンがクリックされました'); // デバッグ用ログ
-      
-      // HTML5 file input を使用
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = '.json';
-      input.multiple = false;
-      
-      input.onchange = async (event: any) => {
-        console.log('ファイルが選択されました'); // デバッグ用ログ
-        
-        const file = event.target.files[0];
-        if (!file) {
-          console.log('ファイルが選択されていません');
-          return;
-        }
-        
-        console.log('選択されたファイル:', file.name); // デバッグ用ログ
-        
-        try {
-          // ファイル内容を直接読み取り
-          const fileContent = await file.text();
-          console.log('ファイル内容読み取り完了'); // デバッグ用ログ
-          
-          // JSONとして解析
-          const importedConfig = JSON.parse(fileContent);
-          console.log('JSON解析成功:', importedConfig); // デバッグ用ログ
-          
-          // インポートした設定を一時的に適用して検証
-          const currentConfig = config;
-          setConfig(importedConfig);
-          
-          try {
-            // インポートした設定を検証
-            const validationResult = await validateCurrentConfig();
-            if (!validationResult.valid) {
-              // 無効な設定の場合は元に戻す
-              setConfig(currentConfig);
-              setValidation(validationResult);
-              setError(`インポートされた設定に問題があります: ${validationResult.errors.join(', ')}`);
-              return;
-            }
 
-            // 警告がある場合は表示
-            if (validationResult.warnings.length > 0) {
-              setValidation(validationResult);
-              setTimeout(() => setValidation(null), 5000);
-            }
 
-            // 設定を適用
-            setSuccess(`設定をインポートしました (${file.name})`);
-            onConfigChange(importedConfig);
-            
-            // インポート後は未保存状態をリセット
-            setOriginalConfig(importedConfig);
-            setHasUnsavedChanges(false);
-            
-            setTimeout(() => setSuccess(null), 3000);
-            
-          } catch (validationError) {
-            // 検証エラーの場合は元の設定に戻す
-            setConfig(currentConfig);
-            setError('インポートした設定の検証に失敗しました');
-          }
-          
-        } catch (err) {
-          console.error('インポートエラー:', err); // デバッグ用ログ
-          if (err instanceof SyntaxError) {
-            setError('JSONファイルの形式が正しくありません');
-          } else {
-            setError(err instanceof Error ? err.message : 'ファイルの読み込みに失敗しました');
-          }
-        }
-      };
-      
-      console.log('ファイルダイアログを表示します'); // デバッグ用ログ
-      input.click();
-      
-    } catch (err) {
-      console.error('ファイル選択エラー:', err); // デバッグ用ログ
-      setError(err instanceof Error ? err.message : 'ファイル選択に失敗しました');
-    }
-  };
-
-  // 最近使用したファイルをクリア
-  const clearRecentFiles = async () => {
-    if (!confirm('最近使用したファイルの履歴をクリアしますか？')) {
-      return;
-    }
-
-    try {
-      const updatedConfig = await TauriCommands.clearRecentFiles();
-      setConfig(updatedConfig);
-      setSuccess('最近使用したファイルをクリアしました');
-      onConfigChange(updatedConfig);
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'ファイル履歴のクリアに失敗しました');
-    }
-  };
 
   // 設定値を更新
   const updateConfigValue = (path: string, value: any) => {
@@ -510,7 +418,7 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
   const testConfigOperations = async () => {
     try {
       const updateResult = await TauriCommands.updateConfig({
-        "user_preferences.notification_enabled": !config.user_preferences.notification_enabled
+        "app_settings.log_level": config.app_settings.log_level === "info" ? "debug" : "info"
       });
       addTestResult(`✅ 設定更新完了`);
       setConfig(updateResult);
@@ -1305,10 +1213,6 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
 
   return (
     <div className="config-manager">
-      <div className="config-header">
-        <h2>ReelVault{isDev() && ' (開発環境)'}</h2>
-      </div>
-
       {error && (
         <div className="alert alert-error">
           <span>❌ {error}</span>
@@ -1358,150 +1262,199 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
         </div>
       )}
 
-      <div className="main-layout">
-        <div className="config-tabs">
-          <button 
-            className={`tab ${activeTab === 'status' ? 'active' : ''}`}
-            onClick={() => setActiveTab('status')}
-          >
-            📊 状態
-          </button>
-          <button 
-            className={`tab ${activeTab === 'app' ? 'active' : ''}`}
-            onClick={() => setActiveTab('app')}
-          >
-            🖥️ アプリ設定
-          </button>
-          <button 
-            className={`tab ${activeTab === 'auth' ? 'active' : ''}`}
-            onClick={() => setActiveTab('auth')}
-          >
-            🔐 AWS認証
-          </button>
-          <button 
-            className={`tab ${activeTab === 'aws_settings' ? 'active' : ''}`}
-            onClick={() => setActiveTab('aws_settings')}
-          >
-            ☁️ AWS S3設定
-          </button>
-          <button 
-            className={`tab ${activeTab === 'upload' ? 'active' : ''}`}
-            onClick={() => setActiveTab('upload')}
-          >
-            💾 バックアップ
-          </button>
-          <button 
-            className={`tab ${activeTab === 'restore' ? 'active' : ''}`}
-            onClick={() => setActiveTab('restore')}
-          >
-            📦 リストア
-          </button>
-          {isDev() && (
+      <div className="two-column-layout">
+        <div className="sidebar">
+          <div className="config-tabs">
             <button 
-              className={`tab ${activeTab === 'api_test' ? 'active' : ''}`}
-              onClick={() => setActiveTab('api_test')}
+              className={`tab ${activeTab === 'status' ? 'active' : ''}`}
+              onClick={() => setActiveTab('status')}
             >
-              🧪 APIテスト
+              <img src={statusIcon} alt="" className="tab-icon" />
+              ステータス
             </button>
-          )}
+            <button 
+              className={`tab ${activeTab === 'auth' ? 'active' : ''}`}
+              onClick={() => setActiveTab('auth')}
+            >
+              <img src={settingsIcon} alt="" className="tab-icon" />
+              設定
+            </button>
+            <button 
+              className={`tab ${activeTab === 'upload' ? 'active' : ''}`}
+              onClick={() => setActiveTab('upload')}
+            >
+              <img src={backupIcon} alt="" className="tab-icon" />
+              バックアップ
+            </button>
+            <button 
+              className={`tab ${activeTab === 'restore' ? 'active' : ''}`}
+              onClick={() => setActiveTab('restore')}
+            >
+              <img src={restoreIcon} alt="" className="tab-icon" />
+              リストア
+            </button>
+            {isDev() && (
+              <button 
+                className={`tab ${activeTab === 'api_test' ? 'active' : ''}`}
+                onClick={() => setActiveTab('api_test')}
+              >
+                <img src={apiTestIcon} alt="" className="tab-icon" />
+                APIテスト
+              </button>
+            )}
+          </div>
+          
+          <div className="app-info">
+            <div className="app-name">ReelVault</div>
+            <div className="app-subtitle">映像制作者のためのアーカイブツール</div>
+            <div className="app-copyright">© 2025 CIVICTECH.TV, LLC</div>
+          </div>
         </div>
 
-        <div className="config-content">
-          {activeTab === 'status' && (
-            <div className="status-container">
-              <div className="section">
-                <h2>⚙️ 重要な設定サマリー</h2>
-                <div className="config-display">
-                  <p><strong>🪣 S3バケット名:</strong> {config.user_preferences.default_bucket_name || "未設定"}</p>
+        <div className="main-content">
+                    {activeTab === 'status' && (
+            <div className="config-section">
+              <h3><img src={statusIcon} alt="" className="title-icon" />システム状態</h3>
+              
+              <div className="config-group centered-field">
+                <label>S3バケット名:</label>
+                <input
+                  type="text"
+                  value={config.user_preferences.default_bucket_name || ''}
+                  disabled
+                  className="readonly-input"
+                  placeholder="未設定"
+                />
+              </div>
 
-                  <p><strong>🌍 AWSリージョン:</strong> {config.aws_settings.default_region}</p>
-                  <p><strong>⏱️ タイムアウト:</strong> {config.aws_settings.timeout_seconds}秒</p>
-                  <p><strong>🔄 S3ライフサイクル:</strong> 
-                    {config.user_preferences.default_bucket_name ? (
+              <div className="config-group centered-field">
+                <label>AWSリージョン:</label>
+                <input
+                  type="text"
+                  value={config.aws_settings.default_region}
+                  disabled
+                  className="readonly-input"
+                />
+              </div>
+
+              <div className="config-group centered-field">
+                <label>タイムアウト:</label>
+                <input
+                  type="text"
+                  value={`${config.aws_settings.timeout_seconds}秒`}
+                  disabled
+                  className="readonly-input"
+                />
+              </div>
+
+              <div className="config-group centered-field">
+                <label>S3ライフサイクル:</label>
+                <input
+                  type="text"
+                  value={
+                    config.user_preferences.default_bucket_name ? (
                       lifecycleStatus ? (
-                        lifecycleStatus.error_message ? (
-                          <span className="status-error">⚠️ {lifecycleStatus.error_message}</span>
-                        ) : lifecycleStatus.enabled ? (
-                          <span className="status-enabled">
-                            ✅ 有効 ({lifecycleStatus.transition_days || 'N/A'}日後 → {lifecycleStatus.storage_class || 'N/A'})
-                          </span>
-                        ) : (
-                          <span className="status-disabled">❌ 無効</span>
-                        )
-                      ) : (
-                        <span className="status-checking">🔄 確認中...</span>
-                      )
-                    ) : (
-                      <span className="status-unavailable">⚠️ バケット未設定</span>
-                    )}
-                  </p>
-                  <p><strong>🩺 アップロード安全性:</strong> 
-                    {isLifecycleHealthy ? (
-                      <span className="status-enabled">✅ 準備完了</span>
-                    ) : (
-                      <span className="status-error">⚠️ 設定に問題あり</span>
-                    )}
-                    {lastHealthCheck && (
-                      <small style={{marginLeft: '8px', opacity: 0.7}}>
-                        (最終確認: {lastHealthCheck.toLocaleTimeString()})
-                      </small>
-                    )}
-                  </p>
-                  <p><strong>🏷️ アプリバージョン:</strong> {config.version}</p>
-                </div>
+                        lifecycleStatus.error_message ? 
+                          `⚠️ ${lifecycleStatus.error_message}` :
+                        lifecycleStatus.enabled ? 
+                          `✅ 有効 (${lifecycleStatus.transition_days || 'N/A'}日後 → ${lifecycleStatus.storage_class || 'N/A'})` :
+                          "❌ 無効"
+                      ) : "🔄 確認中..."
+                    ) : "⚠️ バケット未設定"
+                  }
+                  disabled
+                  className="readonly-input"
+                />
               </div>
 
-              <div className="section">
-                <h2>🚦 システム状態</h2>
-                <div className="state-display">
-                  <p><strong>👁️ ファイル監視:</strong> {appState.is_watching ? "🟢 実行中" : "🔴 停止中"}</p>
-                  <p><strong>☁️ AWS接続:</strong> {appState.system_status.aws_connected ? "🟢 接続済み" : "🔴 未接続"}</p>
-                  <p><strong>🌐 ネットワーク:</strong> {appState.system_status.network_available ? "🟢 利用可能" : "🔴 利用不可"}</p>
-                  <p><strong>⏰ 最終ヘルスチェック:</strong> {new Date(appState.system_status.last_heartbeat).toLocaleString()}</p>
-                </div>
+              <div className="config-group centered-field">
+                <label>アップロード安全性:</label>
+                <input
+                  type="text"
+                  value={
+                    isLifecycleHealthy ? 
+                      `✅ 準備完了${lastHealthCheck ? ` (最終確認: ${lastHealthCheck.toLocaleTimeString()})` : ''}` :
+                      "⚠️ 設定に問題あり"
+                  }
+                  disabled
+                  className="readonly-input"
+                />
               </div>
 
-              <div className="section">
-                <h2>📊 パフォーマンス</h2>
-                <div className="performance-display">
-                  <p><strong>💾 ディスク容量:</strong> {appState.system_status.disk_space_gb.toFixed(1)}GB</p>
-                  <p><strong>🧠 メモリ使用量:</strong> {appState.system_status.memory_usage_mb.toFixed(0)}MB</p>
-                  <p><strong>⚡ CPU使用率:</strong> {appState.system_status.cpu_usage_percent.toFixed(1)}%</p>
-                </div>
+              <div className="config-group centered-field">
+                <label>アプリバージョン:</label>
+                <input
+                  type="text"
+                  value={config.version}
+                  disabled
+                  className="readonly-input"
+                />
               </div>
 
-              <div className="section">
-                <h2>📈 アップロード統計</h2>
-                <div className="statistics-display">
-                  <p><strong>📤 キュー内:</strong> {appState.upload_queue.length}個のファイル</p>
-                  <p><strong>✅ 成功:</strong> {appState.statistics.successful_uploads}件</p>
-                  <p><strong>❌ 失敗:</strong> {appState.statistics.failed_uploads}件</p>
-                  <p><strong>📈 総転送量:</strong> {(appState.statistics.total_bytes_uploaded / (1024 * 1024 * 1024)).toFixed(2)}GB</p>
-                  <p><strong>🏎️ 平均速度:</strong> {appState.statistics.average_upload_speed_mbps.toFixed(2)}Mbps</p>
+              <div className="config-group centered-field">
+                <label>デバッグログ:</label>
+                <div 
+                  className="toggle-switch"
+                  style={{
+                    position: 'relative',
+                    display: 'inline-block',
+                    width: '60px',
+                    height: '34px',
+                    cursor: 'pointer'
+                  }}
+                  onClick={() => {
+                    const newValue = config.app_settings.log_level === 'debug' ? 'info' : 'debug';
+                    console.log('デバッグログ切り替え:', newValue);
+                    updateConfigValue('app_settings.log_level', newValue);
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={config.app_settings.log_level === 'debug'}
+                    onChange={() => {}} // onClickで処理するため空にする
+                    style={{
+                      opacity: 0,
+                      width: 0,
+                      height: 0,
+                      position: 'absolute'
+                    }}
+                  />
+                  <span 
+                    style={{
+                      position: 'absolute',
+                      cursor: 'pointer',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      backgroundColor: config.app_settings.log_level === 'debug' ? '#333333' : '#ccc',
+                      transition: '0.4s',
+                      borderRadius: '34px'
+                    }}
+                  >
+                    <span
+                      style={{
+                        position: 'absolute',
+                        height: '26px',
+                        width: '26px',
+                        left: config.app_settings.log_level === 'debug' ? '30px' : '4px',
+                        bottom: '4px',
+                        backgroundColor: 'white',
+                        transition: '0.4s',
+                        borderRadius: '50%'
+                      }}
+                    />
+                  </span>
                 </div>
               </div>
-
-              <div className="section">
-                <h2>🔧 機能設定</h2>
-                <div className="features-display">
-                  <p><strong>🔔 通知:</strong> {config.user_preferences.notification_enabled ? "🟢 有効" : "🔴 無効"}</p>
-                  <p><strong>📦 圧縮:</strong> {config.user_preferences.compression_enabled ? "🟢 有効" : "🔴 無効"}</p>
-                  
-                  <p><strong>📂 最近のファイル:</strong> {config.user_preferences.recent_files.length}件保存</p>
-                  <p><strong>📄 ログレベル:</strong> {config.app_settings.log_level}</p>
-                  <p><strong>🎨 UIテーマ:</strong> {config.app_settings.theme}</p>
-                </div>
-              </div>
-
-
 
               {appState.upload_queue.length > 0 && (
-                <div className="section">
-                  <h2>📤 アップロードキュー ({appState.upload_queue.length}件)</h2>
+                <div className="config-group">
+                  <label>アップロードキュー ({appState.upload_queue.length}件):</label>
                   <div className="upload-queue">
                     {appState.upload_queue.slice(0, 5).map((item) => (
                       <div key={item.id} className="queue-item">
-                        <p><strong>📄 {item.file_name}</strong></p>
+                        <p><strong>{item.file_name}</strong></p>
                         <p>サイズ: {(item.file_size / (1024 * 1024)).toFixed(2)}MB | 状態: {item.status} | 進捗: {item.progress}%</p>
                       </div>
                     ))}
@@ -1513,8 +1466,8 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
               )}
 
               {appState.current_uploads.length > 0 && (
-                <div className="section">
-                  <h2>⚡ 現在のアップロード</h2>
+                <div className="config-group">
+                  <label>現在のアップロード:</label>
                   <div className="current-uploads">
                     {appState.current_uploads.map((upload) => (
                       <div key={upload.item_id} className="upload-progress">
@@ -1530,8 +1483,8 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
               )}
 
               {appState.last_error && (
-                <div className="section">
-                  <h2>⚠️ 最近のエラー</h2>
+                <div className="config-group">
+                  <label>最近のエラー:</label>
                   <div className="error-display">
                     <p className="error-message">{appState.last_error}</p>
                   </div>
@@ -1539,67 +1492,10 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
               )}
             </div>
           )}
-          {activeTab === 'app' && (
-            <div className="config-section">
-              <h3>アプリケーション設定</h3>
-              
-              {/* 設定管理ボタン */}
-              <div className="config-group centered-field">
-                <label>ログレベル:</label>
-                <select
-                  value={config.app_settings.log_level}
-                  onChange={(e) => updateConfigValue('app_settings.log_level', e.target.value)}
-                >
-                  <option value="info">Info（標準）</option>
-                  <option value="debug">Debug（詳細）</option>
-                </select>
-              </div>
 
-              <div className="config-group centered-field">
-                <label>テーマ:</label>
-                <select
-                  value={config.app_settings.theme}
-                  onChange={(e) => updateConfigValue('app_settings.theme', e.target.value)}
-                >
-                  <option value="dark">ダーク</option>
-                  <option value="light">ライト</option>
-                  <option value="auto">自動</option>
-                </select>
-              </div>
-
-              <div className="config-group">
-                <h4>設定の管理</h4>
-                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
-                  ※ AWS認証情報は含まれません。セキュリティ上、認証情報は別途管理されます。
-                </p>
-                <div className="config-actions-group">
-                  <button onClick={exportConfig} className="btn-secondary">
-                    📤 アプリ設定エクスポート
-                  </button>
-                  <button onClick={importConfig} className="btn-secondary">
-                    📥 アプリ設定インポート
-                  </button>
-                </div>
-              </div>
-
-              <div className="danger-zone">
-                <h4>危険な操作</h4>
-                <p>以下の操作は元に戻せません。実行する前に、内容をよく確認してください。</p>
-                <div className="danger-actions">
-                    <button onClick={resetConfig} className="btn-danger">
-                      🔄 すべての設定をリセット
-                    </button>
-                </div>
-                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '8px' }}>
-                  ※ すべてのアプリ設定が初期値に戻されます。AWS認証情報も削除されます。
-                </p>
-              </div>
-
-            </div>
-          )}
           {activeTab === 'auth' && (
             <div className="config-section">
-              <h3>AWS認証</h3>
+              <h3><img src={settingsIcon} alt="" className="title-icon" />設定</h3>
               {authError && (
                 <div className="status-card error">
                   <h4>認証エラー</h4>
@@ -1745,7 +1641,7 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
                         <small style={{ 
                           display: 'block', 
                           marginTop: '8px', 
-                          color: lifecycleStatus?.enabled ? 'var(--status-success-text)' : 'var(--status-warning-text)', 
+                          color: lifecycleStatus?.enabled ? 'rgb(85, 85, 85)' : 'rgb(102, 102, 102)', 
                           fontSize: '12px' 
                         }}>
                           {lifecycleStatus?.enabled ? (
@@ -1812,127 +1708,24 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
                     )}
                 </div>
               )}
-            </div>
-          )}
-          {activeTab === 'aws_settings' && (
-            <div className="config-section">
-              <h3>AWS S3設定</h3>
-              
-              <div className="config-group centered-field">
-                <label>S3バケット名:</label>
-                <input
-                  type="text"
-                  value={config.user_preferences.default_bucket_name || ''}
-                  disabled
-                  className="readonly-input"
-                  placeholder="AWS認証タブでバケットアクセステスト時に自動設定されます"
-                />
-                <small className="field-help">
-                  💡 AWS認証タブでバケットアクセステストが成功すると自動的に設定されます
-                </small>
-              </div>
 
-              <div className="config-group centered-field">
-                <label>S3ライフサイクル設定:</label>
-                <select
-                  value={
-                    lifecycleStatus?.enabled ? 
-                      `${lifecycleStatus.transition_days}日後-${lifecycleStatus.storage_class}` : 
-                      lifecycleStatus === null ? 'checking' : 'disabled'
-                  }
-                  disabled
-                  className="readonly-select"
-                >
-                  <option value="checking">🔄 確認中...</option>
-                  <option value="disabled">❌ 無効</option>
-                  <option value="1日後-DEEP_ARCHIVE">✅ 1日後 → DEEP_ARCHIVE</option>
-                  <option value="7日後-DEEP_ARCHIVE">✅ 7日後 → DEEP_ARCHIVE</option>
-                  <option value="30日後-GLACIER">✅ 30日後 → GLACIER</option>
-                </select>
-                <small className="field-help">
-                  {config.user_preferences.default_bucket_name && 
-                   lifecycleStatus !== null && 
-                   !lifecycleStatus.enabled ? (
-                    <>⚠️ ライフサイクル設定が見つかりません。AWS認証タブで「🔄 ライフサイクル再設定」を実行してください。</>
-                  ) : (
-                    <>💡 ライフサイクル設定はAWS認証タブのバケットアクセステスト時に自動適用されます（表示専用）</>
-                  )}
-                </small>
-              </div>
-
-
-
-              <div className="config-group centered-field">
-                <label>タイムアウト (秒):</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="3600"
-                  value={config.aws_settings.timeout_seconds}
-                  onChange={(e) => updateConfigValue('aws_settings.timeout_seconds', parseInt(e.target.value))}
-                />
-              </div>
-
-              <div className="config-group centered-field">
-                <label>最大リトライ回数:</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="10"
-                  value={config.aws_settings.max_retries}
-                  onChange={(e) => updateConfigValue('aws_settings.max_retries', parseInt(e.target.value))}
-                />
-              </div>
-
-              <div className="config-group">
-                <div className="settings-group-container">
-                  <div className="setting-row">
-                    <label htmlFor="compressionSwitch">圧縮を有効にする</label>
-                    <label className="toggle-switch">
-                      <input 
-                        id="compressionSwitch"
-                        type="checkbox" 
-                        checked={config.user_preferences.compression_enabled}
-                        onChange={(e) => updateConfigValue('user_preferences.compression_enabled', e.target.checked)} 
-                      />
-                      <span className="slider"></span>
-                    </label>
-                  </div>
-                  <div className="setting-row">
-                    <label htmlFor="notificationSwitch">通知を有効にする</label>
-                    <label className="toggle-switch">
-                      <input 
-                        id="notificationSwitch"
-                        type="checkbox" 
-                        checked={config.user_preferences.notification_enabled}
-                        onChange={(e) => updateConfigValue('user_preferences.notification_enabled', e.target.checked)} 
-                      />
-                      <span className="slider"></span>
-                    </label>
-                  </div>
+              <div className="danger-zone">
+                <h4>危険な操作</h4>
+                <p>以下の操作は元に戻せません。実行する前に、内容をよく確認してください。</p>
+                <div className="danger-actions">
+                    <button onClick={resetConfig} className="btn-danger">
+                      すべての設定をリセット
+                    </button>
                 </div>
-              </div>
-
-              <div className="config-group">
-                <label>最近使用したファイル ({config.user_preferences.recent_files.length}件):</label>
-                <div className="recent-files">
-                  {config.user_preferences.recent_files.map((file, index) => (
-                    <div key={index} className="recent-file">
-                      <span>{file}</span>
-                    </div>
-                  ))}
-                  {config.user_preferences.recent_files.length === 0 && (
-                    <p className="no-files">最近使用したファイルはありません</p>
-                  )}
-                  <button onClick={clearRecentFiles} className="btn-warning">
-                    履歴をクリア
-                  </button>
-                </div>
+                <p style={{ fontSize: '12px', color: 'rgb(102, 102, 102)', marginTop: '8px' }}>
+                  ※ すべてのアプリ設定が初期値に戻されます。AWS認証情報も削除されます。
+                </p>
               </div>
             </div>
           )}
+
           {activeTab === 'upload' && (
-            <div className="config-section">
+            <div className="config-section" style={{ padding: 0 }}>
               {(() => {
                 const hasValidCredentials = credentials.access_key_id && 
                                           credentials.secret_access_key && 
@@ -1968,7 +1761,7 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
           {activeTab === 'restore' && (
             <div className="config-section">
               <div className="restore-header-bar">
-                <h3>ファイル復元</h3>
+                <h3><img src={restoreIcon} alt="" className="title-icon" />リストア</h3>
                 <div className="header-buttons">
                   <button
                     onClick={loadS3Objects}
@@ -2338,7 +2131,7 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
                       <div className="action-buttons">
                         <button
                           onClick={handleRestoreRequest}
-                          className="btn-success"
+                          className="btn-secondary"
                         >
                           {(() => {
                             const selectedObjects = s3Objects.filter(obj => selectedFiles.includes(obj.key));
@@ -2348,11 +2141,11 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
                             const alreadyAccessible = selectedFiles.length - needsRestore;
                             
                             if (needsRestore > 0 && alreadyAccessible > 0) {
-                              return `🔄 復元実行 (復元対象: ${needsRestore}個 / アクセス可能: ${alreadyAccessible}個)`;
+                              return `復元実行 (復元対象: ${needsRestore}個 / アクセス可能: ${alreadyAccessible}個)`;
                             } else if (needsRestore > 0) {
-                              return `🔄 復元実行 (${needsRestore}個)`;
+                              return `復元実行 (${needsRestore}個)`;
                             } else {
-                              return `✅ ファイル確認 (${selectedFiles.length}個は既にアクセス可能)`;
+                              return `ファイル確認 (${selectedFiles.length}個は既にアクセス可能)`;
                             }
                           })()}
                         </button>
@@ -2362,9 +2155,8 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
                             selectedFiles.forEach(fileKey => handleDownload(fileKey));
                           }}
                           className="btn-primary"
-                          style={{ marginLeft: '12px' }}
                         >
-                          💾 ダウンロード ({selectedFiles.length}個)
+                          ダウンロード ({selectedFiles.length}個)
                         </button>
                       </div>
                     </div>
@@ -2380,40 +2172,55 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
             </div>
           )}
           {isDev() && activeTab === 'api_test' && (
-            <div className="api-test-container">
-              <div className="section">
-                <h2>Command API テスト</h2>
-                <div className="test-buttons">
-                  <button onClick={testFileOperations}>ファイル操作 API</button>
-                  <button onClick={testAwsOperations}>AWS操作 API</button>
-                  <button onClick={testConfigOperations}>設定管理 API</button>
-                  <button onClick={testStateOperations}>状態管理 API</button>
-                  <button onClick={testRestoreOperations}>復元機能テスト</button>
-                  <button onClick={testLifecycleOperations}>ライフサイクル管理テスト</button>
+            <div className="config-section">
+              <h3><img src={apiTestIcon} alt="" className="title-icon" />APIテスト</h3>
+              
+              <div className="config-group">
+                <label>Command API テスト:</label>
+                <div className="test-buttons" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginTop: '8px' }}>
+                  <button onClick={testFileOperations} className="btn-secondary">ファイル操作 API</button>
+                  <button onClick={testAwsOperations} className="btn-secondary">AWS操作 API</button>
+                  <button onClick={testConfigOperations} className="btn-secondary">設定管理 API</button>
+                  <button onClick={testStateOperations} className="btn-secondary">状態管理 API</button>
+                  <button onClick={testRestoreOperations} className="btn-secondary">復元機能テスト</button>
+                  <button onClick={testLifecycleOperations} className="btn-secondary">ライフサイクル管理テスト</button>
                 </div>
               </div>
-              <div className="section">
-                <h2>テスト結果</h2>
-                <div className="test-results-header">
-                  <button onClick={clearTestResults}>結果をクリア</button>
+
+              <div className="config-group">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <label>テスト結果:</label>
+                  <button onClick={clearTestResults} className="btn-secondary" style={{ fontSize: '12px', padding: '4px 8px' }}>結果をクリア</button>
                 </div>
-                <div className="test-results">
-                  {testResults.map((result, index) => (
-                    <div key={index} className="test-result">
-                      {result}
-                    </div>
-                  ))}
+                <div className="test-results" style={{ 
+                  backgroundColor: '#f8f9fa', 
+                  border: '2px solid #e5e5ea', 
+                  borderRadius: '6px', 
+                  padding: '12px', 
+                  maxHeight: '300px', 
+                  overflowY: 'auto',
+                  fontFamily: 'monospace',
+                  fontSize: '12px'
+                }}>
+                  {testResults.length === 0 ? (
+                    <div style={{ color: '#666', fontStyle: 'italic' }}>テスト結果がここに表示されます</div>
+                  ) : (
+                    testResults.map((result, index) => (
+                      <div key={index} style={{ 
+                        marginBottom: '4px', 
+                        padding: '4px 0',
+                        borderBottom: index < testResults.length - 1 ? '1px solid #e5e5ea' : 'none'
+                      }}>
+                        {result}
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             </div>
           )}
         </div>
       </div>
-
-      <div className="config-info">
-        <p>ReelVault - 映像制作者のためのアーカイブツール</p>
-        <p>© 2025 CIVICTECH.TV, LLC</p>
-      </div>
     </div>
   );
-}; 
+}); 

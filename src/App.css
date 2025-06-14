@@ -323,7 +323,9 @@ button[type="submit"]:hover {
 
 .config-actions-group button {
   flex: 1;
-  min-width: 150px;
+  min-width: 180px;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 :root {

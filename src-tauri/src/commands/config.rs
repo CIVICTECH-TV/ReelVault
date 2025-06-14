@@ -24,9 +24,6 @@ pub struct AppSettings {
 pub struct UserPreferences {
     pub default_bucket_name: Option<String>,
     pub default_storage_class: String,
-    pub compression_enabled: bool,
-    pub notification_enabled: bool,
-    pub recent_files: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,9 +68,6 @@ impl Default for UserPreferences {
         UserPreferences {
             default_bucket_name: None,
             default_storage_class: "DEEP_ARCHIVE".to_string(),
-            compression_enabled: true,
-            notification_enabled: true,
-            recent_files: Vec::new(),
         }
     }
 }
@@ -239,16 +233,7 @@ pub async fn update_config(app: AppHandle, updates: HashMap<String, serde_json::
                     config.user_preferences.default_storage_class = v.to_string();
                 }
             }
-            "user_preferences.compression_enabled" => {
-                if let Some(v) = value.as_bool() {
-                    config.user_preferences.compression_enabled = v;
-                }
-            }
-            "user_preferences.notification_enabled" => {
-                if let Some(v) = value.as_bool() {
-                    config.user_preferences.notification_enabled = v;
-                }
-            }
+
             "aws_settings.default_region" => {
                 if let Some(v) = value.as_str() {
                     config.aws_settings.default_region = v.to_string();
@@ -417,29 +402,4 @@ pub async fn restore_config(app: AppHandle, backup_path: String) -> Result<AppCo
     Ok(config)
 }
 
-#[tauri::command]
-pub async fn add_recent_file(app: AppHandle, file_path: String) -> Result<AppConfig, String> {
-    let mut config = get_config(app.clone()).await?;
-    
-    // 既に存在する場合は削除
-    config.user_preferences.recent_files.retain(|f| f != &file_path);
-    
-    // 先頭に追加
-    config.user_preferences.recent_files.insert(0, file_path);
-    
-    // 最大10件まで
-    if config.user_preferences.recent_files.len() > 10 {
-        config.user_preferences.recent_files.truncate(10);
-    }
-    
-    set_config(app, config.clone()).await?;
-    Ok(config)
-}
-
-#[tauri::command]
-pub async fn clear_recent_files(app: AppHandle) -> Result<AppConfig, String> {
-    let mut config = get_config(app.clone()).await?;
-    config.user_preferences.recent_files.clear();
-    set_config(app, config.clone()).await?;
-    Ok(config)
-} 
+ 

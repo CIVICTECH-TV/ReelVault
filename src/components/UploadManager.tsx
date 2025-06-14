@@ -5,6 +5,9 @@ import { TauriCommands, UploadItem, UploadStatus, UploadStatistics, FileSelectio
 import { debugLog, isDev, debugError, debugWarn, debugInfo } from '../utils/debug';
 import './UploadManager.css';
 
+// バックアップアイコンのインポート
+import backupIcon from '../assets/icons/backup.svg';
+
 interface UploadManagerProps {
   awsCredentials?: AwsCredentials;
   bucketName?: string;
@@ -717,7 +720,7 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
   return (
     <div className="upload-manager">
       <div className="upload-header">
-        <h3>💾 ファイルバックアップ</h3>
+        <h3><img src={backupIcon} alt="" className="title-icon" />バックアップ</h3>
         <div className="upload-controls">
           <button 
             className="btn-primary" 
@@ -735,32 +738,134 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
         </div>
       </div>
 
-      {/* 🧪 デバッグ情報 */}
+      {/* デバッグ情報 */}
       {isDev() && (
-        <div style={{ 
-          padding: '10px', 
-          backgroundColor: '#f0f8ff', 
-          border: '1px solid #0066cc',
-          margin: '10px 0',
-          fontSize: '12px'
-        }}>
-          <strong>🔍 デバッグ情報:</strong><br/>
-          uploadConfig: {uploadConfig ? '✅ 設定済み' : '❌ 未設定'}<br/>
+        <div className="config-section debug-info">
+          <h4>デバッグ情報</h4>
+          
+          <div className="config-group">
+            <label>アップロード設定:</label>
+            <input
+              type="text"
+              value={uploadConfig ? '設定済み' : '未設定'}
+              disabled
+              className="readonly-input"
+            />
+          </div>
+
           {uploadConfig && (
             <>
-              ├─ tier: {uploadConfig.tier}<br/>
-              ├─ max_concurrent_uploads: {uploadConfig.max_concurrent_uploads}<br/>
-              ├─ max_concurrent_parts: {uploadConfig.max_concurrent_parts}<br/>
-              ├─ chunk_size_mb: {uploadConfig.chunk_size_mb}<br/>
-              ├─ adaptive_chunk_size: {uploadConfig.adaptive_chunk_size ? '✅' : '❌'}<br/>
-              ├─ retry_attempts: {uploadConfig.retry_attempts}<br/>
-              └─ enable_resume: {uploadConfig.enable_resume ? '✅' : '❌'}<br/>
+              <div className="config-group">
+                <label>機能ティア:</label>
+                <input
+                  type="text"
+                  value={uploadConfig.tier}
+                  disabled
+                  className="readonly-input"
+                />
+              </div>
+
+              <div className="config-group">
+                <label>同時アップロード数:</label>
+                <input
+                  type="text"
+                  value={uploadConfig.max_concurrent_uploads}
+                  disabled
+                  className="readonly-input"
+                />
+              </div>
+
+              <div className="config-group">
+                <label>チャンク並列数:</label>
+                <input
+                  type="text"
+                  value={uploadConfig.max_concurrent_parts}
+                  disabled
+                  className="readonly-input"
+                />
+              </div>
+
+              <div className="config-group">
+                <label>チャンクサイズ:</label>
+                <input
+                  type="text"
+                  value={`${uploadConfig.chunk_size_mb}MB`}
+                  disabled
+                  className="readonly-input"
+                />
+              </div>
+
+              <div className="config-group">
+                <label>動的チャンクサイズ:</label>
+                <input
+                  type="text"
+                  value={uploadConfig.adaptive_chunk_size ? '有効' : '無効'}
+                  disabled
+                  className="readonly-input"
+                />
+              </div>
+
+              <div className="config-group">
+                <label>リトライ回数:</label>
+                <input
+                  type="text"
+                  value={uploadConfig.retry_attempts}
+                  disabled
+                  className="readonly-input"
+                />
+              </div>
+
+              <div className="config-group">
+                <label>再開機能:</label>
+                <input
+                  type="text"
+                  value={uploadConfig.enable_resume ? '有効' : '無効'}
+                  disabled
+                  className="readonly-input"
+                />
+              </div>
             </>
           )}
-          uploadQueue: {uploadQueue.length}個のファイル<br/>
-          isUploading: {isUploading ? '✅ アップロード中' : '❌ 停止中'}<br/>
-          awsCredentials: {awsCredentials ? '✅ あり' : '❌ なし'}<br/>
-          bucketName: {bucketName || '❌ 未設定'}
+
+          <div className="config-group">
+            <label>アップロードキュー:</label>
+            <input
+              type="text"
+              value={`${uploadQueue.length}個のファイル`}
+              disabled
+              className="readonly-input"
+            />
+          </div>
+
+          <div className="config-group">
+            <label>アップロード状態:</label>
+            <input
+              type="text"
+              value={isUploading ? 'アップロード中' : '停止中'}
+              disabled
+              className="readonly-input"
+            />
+          </div>
+
+          <div className="config-group">
+            <label>AWS認証情報:</label>
+            <input
+              type="text"
+              value={awsCredentials ? 'あり' : 'なし'}
+              disabled
+              className="readonly-input"
+            />
+          </div>
+
+          <div className="config-group">
+            <label>バケット名:</label>
+            <input
+              type="text"
+              value={bucketName || '未設定'}
+              disabled
+              className="readonly-input"
+            />
+          </div>
         </div>
       )}
 
