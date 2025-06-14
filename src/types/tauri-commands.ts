@@ -165,9 +165,6 @@ export interface AppSettings {
 export interface UserPreferences {
   default_bucket_name?: string;
   default_storage_class: string;
-  compression_enabled: boolean;
-  notification_enabled: boolean;
-  recent_files: string[];
 }
 
 export interface AwsSettings {
@@ -385,11 +382,7 @@ export const TauriCommands = {
   restoreConfig: (backupPath: string): Promise<AppConfig> =>
     invoke('restore_config', { backupPath }),
   
-  addRecentFile: (filePath: string): Promise<AppConfig> =>
-    invoke('add_recent_file', { filePath }),
-  
-  clearRecentFiles: (): Promise<AppConfig> =>
-    invoke('clear_recent_files'),
+
 
   // 状態管理API
   getAppState: (): Promise<AppState> =>

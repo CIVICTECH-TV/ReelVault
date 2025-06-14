@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { listen } from '@tauri-apps/api/event';
 import { TauriCommands, AppConfig, AppState } from "./types/tauri-commands";
-import { ConfigManager } from "./components/ConfigManager";
+import { ConfigManager, ConfigManagerRef } from "./components/ConfigManager";
 import "./App.css";
 
 function App() {
@@ -8,6 +9,7 @@ function App() {
   const [appState, setAppState] = useState<AppState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const configManagerRef = useRef<ConfigManagerRef | null>(null);
 
   const [healthStatus, setHealthStatus] = useState<{ isHealthy: boolean; lastCheck: Date | null; bucketName: string | undefined }>({
     isHealthy: true,
@@ -34,6 +36,32 @@ function App() {
       }
     };
     initializeApp();
+  }, []);
+
+  // システムトレイからのイベントリスナー
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const setupEventListener = async () => {
+      try {
+        unlisten = await listen('open-settings', () => {
+          console.log('システムトレイから設定タブを開く要求を受信');
+          if (configManagerRef.current) {
+            configManagerRef.current.openSettingsTab();
+          }
+        });
+      } catch (error) {
+        console.error('イベントリスナーの設定に失敗:', error);
+      }
+    };
+
+    setupEventListener();
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
   }, []);
 
   // configが変更されたらテーマを適用
@@ -75,6 +103,7 @@ function App() {
   return (
     <div className="app-container">
       <ConfigManager
+        ref={configManagerRef}
         initialConfig={config}
         initialState={appState}
         onConfigChange={handleConfigChange}

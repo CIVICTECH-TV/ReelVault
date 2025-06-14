@@ -30,7 +30,7 @@ use commands::lifecycle::*;
 
 // システムトレイのセットアップ関数
 fn setup_system_tray(app: &tauri::App) -> tauri::Result<()> {
-    let settings_item = MenuItem::with_id(app, "settings", "設定", true, None::<&str>)?;
+    let settings_item = MenuItem::with_id(app, "settings", "設定", true, Some("Cmd+,"))?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, "quit", "終了", true, Some("Cmd+Q"))?;
     
@@ -120,8 +120,7 @@ pub fn run() {
         export_config,
         import_config,
         restore_config,
-        add_recent_file,
-        clear_recent_files,
+        
         // 状態管理API
         get_app_state,
         set_app_state,
