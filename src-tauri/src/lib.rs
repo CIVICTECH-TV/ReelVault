@@ -1,5 +1,10 @@
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
 use std::sync::{Arc, Mutex};
+use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager, Emitter,
+};
 
 // モジュール定義
 mod commands {
@@ -23,7 +28,49 @@ use commands::metadata::*;
 use commands::upload_system::*;
 use commands::lifecycle::*;
 
-
+// システムトレイのセットアップ関数
+fn setup_system_tray(app: &tauri::App) -> tauri::Result<()> {
+    let settings_item = MenuItem::with_id(app, "settings", "設定", true, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let quit_item = MenuItem::with_id(app, "quit", "終了", true, Some("Cmd+Q"))?;
+    
+    let menu = Menu::with_items(app, &[&settings_item, &separator, &quit_item])?;
+    
+    let _tray = TrayIconBuilder::new()
+        .icon(app.default_window_icon().unwrap().clone())
+        .menu(&menu)
+        .show_menu_on_left_click(false)  // 左クリックでメニューを無効化
+        .on_tray_icon_event(|tray, event| match event {
+            // 左クリックでメインウィンドウを開く
+            TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } => {
+                let app = tray.app_handle();
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            _ => {}
+        })
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "settings" => {
+                // 設定画面を開く
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                    let _ = app.emit("open-settings", ());
+                }
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .build(app)?;
+    
+    Ok(())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -118,7 +165,21 @@ pub fn run() {
             .build(),
         )?;
       }
+      
+      // システムトレイを初期化
+      setup_system_tray(app)?;
+      
       Ok(())
+    })
+    .on_window_event(|window, event| {
+      match event {
+        tauri::WindowEvent::CloseRequested { api, .. } => {
+          // ウィンドウを閉じる代わりに隠す
+          window.hide().unwrap();
+          api.prevent_close();
+        }
+        _ => {}
+      }
     })
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

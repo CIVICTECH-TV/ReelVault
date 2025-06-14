@@ -85,81 +85,8 @@ pub enum UploadTier {
 }
 
 impl UploadConfig {
-    /// 統一されたアップロード設定を生成
-    /// @param aws_credentials AWS認証情報
-    /// @param bucket_name S3バケット名
-    /// @param tier アップロード機能ティア（デフォルト: Premium）
-    pub fn new(aws_credentials: AwsCredentials, bucket_name: String, tier: UploadTier) -> Self {
-        // 基本設定（共通）
-        let base_config = Self {
-            aws_credentials,
-            bucket_name,
-            auto_create_metadata: true,
-            s3_key_prefix: Some("uploads".to_string()),
-            tier,
-            // 以下はティア別で上書き
-            max_concurrent_uploads: 1,
-            chunk_size_mb: 5,
-            retry_attempts: 3,
-            timeout_seconds: 600,
-            max_concurrent_parts: 1,
-            adaptive_chunk_size: false,
-            min_chunk_size_mb: 5,
-            max_chunk_size_mb: 5,
-            bandwidth_limit_mbps: None,
-            enable_resume: false,
-        };
 
-        match tier {
-            UploadTier::Free => Self {
-                // 無料版制限
-                max_concurrent_uploads: 1,      // 1ファイルずつ
-                chunk_size_mb: 5,               // 5MB固定
-                retry_attempts: 3,              // 3回まで
-                timeout_seconds: 600,           // 10分
-                max_concurrent_parts: 1,        // チャンクも1つずつ（順次処理）
-                adaptive_chunk_size: false,     // 固定サイズ
-                min_chunk_size_mb: 5,          // 5MB固定
-                max_chunk_size_mb: 5,          // 5MB固定
-                bandwidth_limit_mbps: None,     // 制限なし
-                enable_resume: false,           // 再開機能なし
-                ..base_config
-            },
-            UploadTier::Premium => Self {
-                // プレミアム版機能
-                max_concurrent_uploads: 8,      // 8ファイル同時
-                chunk_size_mb: 10,              // デフォルト10MB
-                retry_attempts: 10,             // 10回まで
-                timeout_seconds: 1800,          // 30分
-                max_concurrent_parts: 8,        // 8チャンク並列
-                adaptive_chunk_size: true,      // 動的最適化
-                min_chunk_size_mb: 5,          // 最小5MB（S3制限準拠）
-                max_chunk_size_mb: 100,        // 最大100MB
-                bandwidth_limit_mbps: None,     // 制限なし（設定可能）
-                enable_resume: true,            // 再開機能あり
-                ..base_config
-            }
-        }
-    }
-    
-    /// 現在の設定が無料版制限内かチェック
-    pub fn validate_free_tier_limits(&self) -> Result<(), String> {
-        if self.tier == UploadTier::Free {
-            if self.max_concurrent_uploads > 1 {
-                return Err("無料版では同時アップロードは1ファイルまでです".to_string());
-            }
-            if self.max_concurrent_parts > 1 {
-                return Err("無料版ではチャンク並列処理はできません".to_string());
-            }
-            if self.adaptive_chunk_size {
-                return Err("無料版では動的チャンクサイズは利用できません".to_string());
-            }
-            if self.chunk_size_mb != 5 || self.min_chunk_size_mb != 5 || self.max_chunk_size_mb != 5 {
-                return Err("無料版ではチャンクサイズは5MB固定です".to_string());
-            }
-        }
-        Ok(())
-    }
+
 }
 
 
@@ -1409,6 +1336,7 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
 
+    #[cfg(test)]
     fn create_test_credentials() -> AwsCredentials {
         AwsCredentials {
             access_key_id: "test_access_key".to_string(),
@@ -1418,14 +1346,28 @@ mod tests {
         }
     }
 
+    #[cfg(test)]
     fn create_test_upload_config() -> UploadConfig {
-        UploadConfig::new(
-            create_test_credentials(),
-            "test-bucket".to_string(),
-            UploadTier::Premium
-        )
+        UploadConfig {
+            aws_credentials: create_test_credentials(),
+            bucket_name: "test-bucket".to_string(),
+            max_concurrent_uploads: 8,
+            chunk_size_mb: 10,
+            retry_attempts: 10,
+            timeout_seconds: 1800,
+            auto_create_metadata: true,
+            s3_key_prefix: Some("uploads".to_string()),
+            max_concurrent_parts: 8,
+            adaptive_chunk_size: true,
+            min_chunk_size_mb: 5,
+            max_chunk_size_mb: 100,
+            bandwidth_limit_mbps: None,
+            enable_resume: true,
+            tier: UploadTier::Premium,
+        }
     }
 
+    #[cfg(test)]
     fn create_test_s3_key_config() -> S3KeyConfig {
         S3KeyConfig {
             prefix: Some("test".to_string()),
