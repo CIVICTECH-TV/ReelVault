@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import { listen } from '@tauri-apps/api/event';
-import { TauriCommands, UploadItem, UploadStatus, UploadStatistics, FileSelection, S3KeyConfig, UploadConfig, AwsCredentials, UploadProgressInfo } from '../types/tauri-commands';
+import { TauriCommands, UploadItem, UploadStatus, UploadStatistics, FileSelection, UploadConfig, AwsCredentials, UploadProgressInfo } from '../types/tauri-commands';
+import { debugLog, isDev, debugError, debugWarn, debugInfo } from '../utils/debug';
 import './UploadManager.css';
 
 interface UploadManagerProps {
@@ -35,9 +36,9 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
   onUploadComplete,
   onError
 }) => {
-  const [isDragOver, setIsDragOver] = useState(false);
+  const [isDragOver, _setIsDragOver] = useState(false);
   const [uploadQueue, setUploadQueue] = useState<UploadItem[]>([]);
-  const [uploadStats, setUploadStats] = useState<UploadStatistics | null>(null);
+  const [_uploadStats, setUploadStats] = useState<UploadStatistics | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<FileSelection | null>(null);
   const [uploadConfig, setUploadConfig] = useState<UploadConfig | null>(null);
@@ -50,7 +51,7 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
   
   // デバッグ用: propsの状態をログ出力
   useEffect(() => {
-    console.log('🔍 UploadManager props状態:', {
+    debugLog('🔍 UploadManager props状態:', {
       awsCredentials: awsCredentials ? 'あり' : 'なし',
       bucketName: bucketName || 'なし',
       uploadConfig: uploadConfig ? 'あり' : 'なし'
@@ -58,14 +59,14 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
   }, [awsCredentials, bucketName, uploadConfig]);
   
   // ネイティブファイルダイアログを使用するため、refは不要
-  const [forceUpdate, setForceUpdate] = useState(0);
-  const progressRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const [_forceUpdate, setForceUpdate] = useState(0);
+  // const _progressRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   // 初期化
   useEffect(() => {
     const initializeUpload = async () => {
       if (!awsCredentials || !bucketName) {
-        console.log('AWS credentials or bucket name not available');
+        debugInfo('AWS credentials or bucket name not available');
         return;
       }
 
@@ -74,7 +75,7 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
         const defaultConfig = createConfig(awsCredentials, bucketName, 'Premium');
         
         // 🔍 設定内容をデバッグ出力
-        console.log('🔧 生成された設定:', {
+        debugLog('🔧 生成された設定:', {
           tier: defaultConfig.tier,
           chunk_size_mb: defaultConfig.chunk_size_mb,
           max_concurrent_uploads: defaultConfig.max_concurrent_uploads,
@@ -85,19 +86,19 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
         });
         
         // 🗑️ 古い設定をクリアして新しい設定で確実に初期化
-        console.log('🗑️ 古いキューをクリア中...');
+        debugInfo('🗑️ 古いキューをクリア中...');
         await TauriCommands.clearUploadQueue();
         
-        console.log('🔄 新しい設定で初期化中...');
+        debugInfo('🔄 新しい設定で初期化中...');
         await TauriCommands.initializeUploadQueue(defaultConfig);
         
         setUploadConfig(defaultConfig);
         setTempConfig(defaultConfig);
         setCurrentTier('Premium');
         
-        console.log('✅ Upload system initialized with premium tier config');
+        debugInfo('✅ Upload system initialized with premium tier config');
       } catch (error) {
-        console.error('Failed to initialize upload system:', error);
+        debugError('Failed to initialize upload system:', error);
         setError(`アップロードシステムの初期化に失敗しました: ${error}`);
       }
     };
@@ -107,9 +108,9 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
 
   // uploadQueueの変更を監視して強制的に再レンダリング
   useEffect(() => {
-    console.log(`🎨 uploadQueue変更検知: ${uploadQueue.length}個のファイル`);
+    debugLog(`🎨 uploadQueue変更検知: ${uploadQueue.length}個のファイル`);
     uploadQueue.forEach((item, index) => {
-      console.log(`  [${index}] ${item.file_name}: ${item.uploaded_bytes}/${item.file_size} bytes (${((item.uploaded_bytes / item.file_size) * 100).toFixed(1)}%)`);
+      debugLog(`  [${index}] ${item.file_name}: ${item.uploaded_bytes}/${item.file_size} bytes (${((item.uploaded_bytes / item.file_size) * 100).toFixed(1)}%)`);
     });
     
     // 強制的に再レンダリング
@@ -120,19 +121,19 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
   useEffect(() => {
     if (!uploadConfig) return;
     
-    console.log('🎧 進捗リスナーを設定中...');
-    console.log('🎧 リスナー設定時のuploadConfig:', uploadConfig);
+    debugInfo('🎧 進捗リスナーを設定中...');
+    debugLog('🎧 リスナー設定時のuploadConfig:', uploadConfig);
     
     // テスト用のイベントリスナーも追加
     const testUnlisten = listen('test-event', (event) => {
-      console.log('🧪 テストイベント受信:', event);
+      debugLog('🧪 テストイベント受信:', event);
     });
     
     const unlisten = listen<UploadProgressInfo>('upload-progress', (event) => {
       const progress = event.payload;
       
       // 全ての進捗イベントをログ出力（デバッグ用）
-      console.log('📊 進捗イベント受信:', {
+      debugLog('📊 進捗イベント受信:', {
         item_id: progress.item_id,
         percentage: progress.percentage.toFixed(1),
         uploaded: `${(progress.uploaded_bytes / (1024 * 1024)).toFixed(1)}MB`,
@@ -150,12 +151,12 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
       if (progressBarElement) {
         (progressBarElement as HTMLElement).style.width = `${Math.max(0, Math.min(100, progress.percentage))}%`;
         (progressBarElement as HTMLElement).style.backgroundColor = progress.status === UploadStatus.Completed ? '#22c55e' : '#3b82f6';
-        console.log(`🎨 直接DOM更新: 進捗バー ${progress.percentage.toFixed(1)}%`);
+        debugLog(`🎨 直接DOM更新: 進捗バー ${progress.percentage.toFixed(1)}%`);
       }
       
       if (progressTextElement) {
         progressTextElement.textContent = `${progress.percentage.toFixed(1)}%`;
-        console.log(`🎨 直接DOM更新: 進捗テキスト ${progress.percentage.toFixed(1)}%`);
+        debugLog(`🎨 直接DOM更新: 進捗テキスト ${progress.percentage.toFixed(1)}%`);
       }
       
       if (progressBytesElement) {
@@ -180,7 +181,7 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
         setUploadQueue(prev => {
           const updated = prev.map(item => {
             if (item.id === progress.item_id) {
-              console.log(`🔄 ファイル進捗更新: ${item.file_name} -> ${progress.percentage.toFixed(1)}%`);
+              debugLog(`🔄 ファイル進捗更新: ${item.file_name} -> ${progress.percentage.toFixed(1)}%`);
               const updatedItem = { 
                 ...item, 
                 progress: progress.percentage,
@@ -195,7 +196,7 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
               };
               
               // 即時にUI更新確認
-              console.log(`✅ UI更新確認: ${updatedItem.file_name} = ${updatedItem.progress.toFixed(1)}% (${updatedItem.status})`);
+              debugLog(`✅ UI更新確認: ${updatedItem.file_name} = ${updatedItem.progress.toFixed(1)}% (${updatedItem.status})`);
               return updatedItem;
             }
             return item;
@@ -257,17 +258,17 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
             );
             
             if (allCompleted) {
-              console.log('🎉 全てのアップロードが完了しました（リアルタイム検知）');
+              debugInfo('🎉 全てのアップロードが完了しました（リアルタイム検知）');
               // 完了状態も即時に反映
               flushSync(() => {
                 setIsUploading(false);
               });
               TauriCommands.stopUploadProcessing().catch(err => 
-                console.warn('アップロード停止コマンドの実行に失敗:', err)
+                debugWarn('アップロード停止コマンドの実行に失敗:', err)
               );
             }
           } catch (err) {
-            console.error('完了時の統計更新に失敗:', err);
+            debugError('完了時の統計更新に失敗:', err);
           }
         }, 100);
       }
@@ -315,12 +316,12 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
         );
         
         if (allCompleted && !inProgress) {
-          console.log('🎉 全てのアップロードが完了しました（定期チェック）');
+          debugInfo('🎉 全てのアップロードが完了しました（定期チェック）');
           const completedItems = queueItems.filter(item => item.status === UploadStatus.Completed);
           onUploadComplete?.(completedItems);
         }
       } catch (err) {
-        console.error('アップロード状態の更新に失敗:', err);
+        debugError('アップロード状態の更新に失敗:', err);
       }
     }, 10000); // 10秒間隔に延長
 
@@ -331,25 +332,25 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
   }, [uploadConfig, isUploading, onUploadComplete]);
 
   // ファイルサイズの検証
-  const validateFileSize = (files: File[]): { valid: boolean; errors: string[] } => {
-    const errors: string[] = [];
-    let totalSizeGB = 0;
+  // const validateFileSize = (files: File[]): { valid: boolean; errors: string[] } => {
+  //   const errors: string[] = [];
+  //   let totalSizeGB = 0;
 
-    for (const file of files) {
-      const fileSizeGB = file.size / (1024 * 1024 * 1024);
-      totalSizeGB += fileSizeGB;
+  //   for (const file of files) {
+  //     const fileSizeGB = file.size / (1024 * 1024 * 1024);
+  //     totalSizeGB += fileSizeGB;
 
-      if (fileSizeGB > FREE_TIER_LIMITS.MAX_FILE_SIZE_GB) {
-        errors.push(`${file.name}: ファイルサイズが制限を超えています (${fileSizeGB.toFixed(2)}GB > ${FREE_TIER_LIMITS.MAX_FILE_SIZE_GB}GB)`);
-      }
-    }
+  //     if (fileSizeGB > FREE_TIER_LIMITS.MAX_FILE_SIZE_GB) {
+  //       errors.push(`${file.name}: ファイルサイズが制限を超えています (${fileSizeGB.toFixed(2)}GB > ${FREE_TIER_LIMITS.MAX_FILE_SIZE_GB}GB)`);
+  //     }
+  //   }
 
-    if (totalSizeGB > FREE_TIER_LIMITS.MAX_TOTAL_SIZE_GB) {
-      errors.push(`合計ファイルサイズが制限を超えています (${totalSizeGB.toFixed(2)}GB > ${FREE_TIER_LIMITS.MAX_TOTAL_SIZE_GB}GB)`);
-    }
+  //   if (totalSizeGB > FREE_TIER_LIMITS.MAX_TOTAL_SIZE_GB) {
+  //     errors.push(`合計ファイルサイズが制限を超えています (${totalSizeGB.toFixed(2)}GB > ${FREE_TIER_LIMITS.MAX_TOTAL_SIZE_GB}GB)`);
+  //   }
 
-    return { valid: errors.length === 0, errors };
-  };
+  //   return { valid: errors.length === 0, errors };
+  // };
 
   // ファイルダイアログを開く（Tauriネイティブダイアログを使用）
   const handleFileDialogOpen = useCallback(async () => {
@@ -378,9 +379,9 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
 
       setSelectedFiles(fileSelection);
       setError(null);
-      console.log('✅ ファイル選択完了:', fileSelection);
+      debugInfo('✅ ファイル選択完了:', fileSelection);
     } catch (err) {
-      console.error('ファイル選択エラー:', err);
+      debugError('ファイル選択エラー:', err);
       setError(`ファイル選択エラー: ${err}`);
     }
   }, [uploadConfig]);
@@ -433,7 +434,7 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
 
         // ネイティブファイルダイアログで取得した実際のファイルパスを使用
         await TauriCommands.addFilesToUploadQueue(selectedFiles.selected_files, s3KeyConfig);
-        console.log(`✅ ${selectedFiles.file_count}個のファイルをキューに追加しました`);
+        debugInfo(`✅ ${selectedFiles.file_count}個のファイルをキューに追加しました`);
 
         // キューの状態を更新
         const [queueItems, stats] = await Promise.all([
@@ -452,7 +453,7 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
         }
         
       } catch (err) {
-        console.error('キューへの追加に失敗:', err);
+        debugError('キューへの追加に失敗:', err);
         setError(`ファイルをキューに追加できませんでした: ${err}`);
         return;
       }
@@ -735,31 +736,33 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
       </div>
 
       {/* 🧪 デバッグ情報 */}
-      <div style={{ 
-        padding: '10px', 
-        backgroundColor: '#f0f8ff', 
-        border: '1px solid #0066cc',
-        margin: '10px 0',
-        fontSize: '12px'
-      }}>
-        <strong>🔍 デバッグ情報:</strong><br/>
-        uploadConfig: {uploadConfig ? '✅ 設定済み' : '❌ 未設定'}<br/>
-        {uploadConfig && (
-          <>
-            ├─ tier: {uploadConfig.tier}<br/>
-            ├─ max_concurrent_uploads: {uploadConfig.max_concurrent_uploads}<br/>
-            ├─ max_concurrent_parts: {uploadConfig.max_concurrent_parts}<br/>
-            ├─ chunk_size_mb: {uploadConfig.chunk_size_mb}<br/>
-            ├─ adaptive_chunk_size: {uploadConfig.adaptive_chunk_size ? '✅' : '❌'}<br/>
-            ├─ retry_attempts: {uploadConfig.retry_attempts}<br/>
-            └─ enable_resume: {uploadConfig.enable_resume ? '✅' : '❌'}<br/>
-          </>
-        )}
-        uploadQueue: {uploadQueue.length}個のファイル<br/>
-        isUploading: {isUploading ? '✅ アップロード中' : '❌ 停止中'}<br/>
-        awsCredentials: {awsCredentials ? '✅ あり' : '❌ なし'}<br/>
-        bucketName: {bucketName || '❌ 未設定'}
-      </div>
+      {isDev() && (
+        <div style={{ 
+          padding: '10px', 
+          backgroundColor: '#f0f8ff', 
+          border: '1px solid #0066cc',
+          margin: '10px 0',
+          fontSize: '12px'
+        }}>
+          <strong>🔍 デバッグ情報:</strong><br/>
+          uploadConfig: {uploadConfig ? '✅ 設定済み' : '❌ 未設定'}<br/>
+          {uploadConfig && (
+            <>
+              ├─ tier: {uploadConfig.tier}<br/>
+              ├─ max_concurrent_uploads: {uploadConfig.max_concurrent_uploads}<br/>
+              ├─ max_concurrent_parts: {uploadConfig.max_concurrent_parts}<br/>
+              ├─ chunk_size_mb: {uploadConfig.chunk_size_mb}<br/>
+              ├─ adaptive_chunk_size: {uploadConfig.adaptive_chunk_size ? '✅' : '❌'}<br/>
+              ├─ retry_attempts: {uploadConfig.retry_attempts}<br/>
+              └─ enable_resume: {uploadConfig.enable_resume ? '✅' : '❌'}<br/>
+            </>
+          )}
+          uploadQueue: {uploadQueue.length}個のファイル<br/>
+          isUploading: {isUploading ? '✅ アップロード中' : '❌ 停止中'}<br/>
+          awsCredentials: {awsCredentials ? '✅ あり' : '❌ なし'}<br/>
+          bucketName: {bucketName || '❌ 未設定'}
+        </div>
+      )}
 
       {error && (
         <div className="upload-error">
@@ -942,30 +945,7 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
         </div>
       )}
 
-      {/* 無料版制限の説明 */}
-      <div className="free-tier-limits">
-        <h4>🆓 無料版の制限</h4>
-        <ul>
-          <li>最大ファイルサイズ: {FREE_TIER_LIMITS.MAX_FILE_SIZE_GB}GB/ファイル</li>
-          <li>同時アップロード: {FREE_TIER_LIMITS.MAX_CONCURRENT_UPLOADS}ファイル（単発処理）</li>
-          <li>チャンクサイズ: 5MB（固定、変更不可）</li>
-          <li>マルチパート設定: 標準設定（固定、カスタマイズ不可）</li>
-          <li>対応形式: 全ファイル形式</li>
-          <li>高速化機能: 無し（有料版で利用可能）</li>
-          {uploadQueue.length > 1 && (
-            <li className="queue-status">
-              📋 キュー内: {uploadQueue.length}個のファイル - 1つずつ順次処理
-              {uploadQueue.filter(item => item.status === UploadStatus.InProgress).length > 0 && (
-                <span className="processing-indicator"> （現在処理中）</span>
-              )}
-            </li>
-          )}
-        </ul>
-        <div className="upgrade-hint">
-          <span>💡 より高速なアップロードや設定カスタマイズをお求めの場合は、</span>
-          <button className="btn-upgrade">プレミアム版にアップグレード</button>
-        </div>
-      </div>
+
 
       {/* 🎯 設定パネル（モーダル） */}
       {showSettings && (

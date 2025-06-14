@@ -126,7 +126,7 @@ fn validate_config(config: &AppConfig) -> ConfigValidationResult {
     }
 
     // ログレベル検証
-    let valid_log_levels = ["error", "warn", "info", "debug", "trace"];
+    let valid_log_levels = ["info", "debug"];
     if !valid_log_levels.contains(&config.app_settings.log_level.as_str()) {
         errors.push(format!("Invalid log level: {}", config.app_settings.log_level));
     }
