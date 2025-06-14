@@ -16,6 +16,7 @@ import {
 import { AWS_REGIONS, DEFAULT_REGION } from '../constants/aws-regions';
 // RestoreManagerは直接統合済み
 import { UploadManager } from './UploadManager';
+import { debugLog, isDev, debugError, debugInfo } from '../utils/debug';
 import './ConfigManager.css';
 
 interface ConfigManagerProps {
@@ -93,17 +94,24 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
   const [restoreTier, setRestoreTier] = useState<'Expedited' | 'Standard' | 'Bulk'>('Standard');
   const [sortField, setSortField] = useState<'name' | 'size' | 'type' | 'modified'>('name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [currentFolder, setCurrentFolder] = useState<string>('');
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  // const [currentFolder, setCurrentFolder] = useState<string>('');
+  // const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   // グループ表示は常に有効（固定）
   const [storageWarnings, setStorageWarnings] = useState<{ [key: string]: { type: string; message: string; fee?: number } }>({});
   const [restoreStatus, setRestoreStatus] = useState<{ [key: string]: { status: string; expiry?: string; progress?: string } }>({});
 
   useEffect(() => {
-    console.log('初期設定更新:', initialConfig); // デバッグ用ログ
+    debugLog('初期設定更新:', initialConfig); // デバッグ用ログ
     setConfig(initialConfig);
     setOriginalConfig(initialConfig);
     setHasUnsavedChanges(false);
+    
+    // localStorageにも保存（ログレベル制御のため）
+    try {
+      localStorage.setItem('reelvault_config', JSON.stringify(initialConfig));
+    } catch (error) {
+      debugError('localStorage初期保存エラー:', error);
+    }
   }, [initialConfig]);
 
   useEffect(() => {
@@ -431,8 +439,8 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
   const updateConfigValue = (path: string, value: any) => {
     if (!config) return;
 
-    console.log(`設定値更新: ${path} = ${value}`); // デバッグ用ログ
-    console.log('現在のoriginalConfig:', originalConfig); // デバッグ用ログ
+    debugLog(`設定値更新: ${path} = ${value}`); // デバッグ用ログ
+    debugLog('現在のoriginalConfig:', originalConfig); // デバッグ用ログ
 
     const keys = path.split('.');
     const newConfig = JSON.parse(JSON.stringify(config));
@@ -443,10 +451,24 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
     }
     current[keys[keys.length - 1]] = value;
 
-    console.log('更新後の設定:', newConfig); // デバッグ用ログ
-    console.log('設定が変更されたか?:', JSON.stringify(newConfig) !== JSON.stringify(originalConfig)); // デバッグ用ログ
+    debugLog('更新後の設定:', newConfig); // デバッグ用ログ
+    debugLog('設定が変更されたか?:', JSON.stringify(newConfig) !== JSON.stringify(originalConfig)); // デバッグ用ログ
     
     setConfig(newConfig);
+    
+    // localStorageにも保存（ログレベル制御のため）
+    try {
+      localStorage.setItem('reelvault_config', JSON.stringify(newConfig));
+      
+      // ログレベル変更時は専用ログを出力
+      if (path === 'app_settings.log_level') {
+        console.log(`🔧 ログレベルが変更されました: ${value}`);
+        console.log('📝 この変更は即座に反映されます');
+      }
+    } catch (error) {
+      debugError('localStorage保存エラー:', error);
+    }
+    
     // 親コンポーネントに通知はするが、未保存状態をマークするのはuseEffectで行う
     // onConfigChange(newConfig);
   };
@@ -952,51 +974,51 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
   }, [activeTab, config.user_preferences.default_bucket_name, credentials.access_key_id]);
 
   // ファイル選択ハンドラー
-  const handleFileSelection = (fileKey: string, isSelected: boolean) => {
-    if (isSelected) {
-      setSelectedFiles(prev => [...prev, fileKey]);
-    } else {
-      setSelectedFiles(prev => prev.filter(key => key !== fileKey));
-    }
-  };
+  // const handleFileSelection = (fileKey: string, isSelected: boolean) => {
+  //   if (isSelected) {
+  //     setSelectedFiles(prev => [...prev, fileKey]);
+  //   } else {
+  //     setSelectedFiles(prev => prev.filter(key => key !== fileKey));
+  //   }
+  // };
 
   // 全選択/全解除
-  const handleSelectAll = () => {
-    const deepArchiveFiles = s3Objects.filter(obj => obj.storage_class === 'DEEP_ARCHIVE');
-    if (selectedFiles.length === deepArchiveFiles.length) {
-      setSelectedFiles([]);
-    } else {
-      setSelectedFiles(deepArchiveFiles.map(obj => obj.key));
-    }
-  };
+  // const handleSelectAll = () => {
+  //   const deepArchiveFiles = s3Objects.filter(obj => obj.storage_class === 'DEEP_ARCHIVE');
+  //   if (selectedFiles.length === deepArchiveFiles.length) {
+  //     setSelectedFiles([]);
+  //   } else {
+  //     setSelectedFiles(deepArchiveFiles.map(obj => obj.key));
+  //   }
+  // };
 
   // ファイル構造を解析（フォルダ階層）
-  const parseFileStructure = (objects: S3Object[]) => {
-    const structure: { [key: string]: { folders: Set<string>; files: S3Object[] } } = {};
-    
-    objects.forEach(obj => {
-      const parts = obj.key.split('/');
-      const fileName = parts[parts.length - 1];
-      const folderPath = parts.slice(0, -1).join('/');
-      
-      if (!structure[folderPath]) {
-        structure[folderPath] = { folders: new Set(), files: [] };
-      }
-      
-      structure[folderPath].files.push(obj);
-      
-      // 親フォルダに子フォルダを登録
-      if (parts.length > 1) {
-        const parentPath = parts.slice(0, -2).join('/');
-        if (!structure[parentPath]) {
-          structure[parentPath] = { folders: new Set(), files: [] };
-        }
-        structure[parentPath].folders.add(folderPath);
-      }
-    });
-    
-    return structure;
-  };
+  // const parseFileStructure = (objects: S3Object[]) => {
+  //   const structure: { [key: string]: { folders: Set<string>; files: S3Object[] } } = {};
+  //   
+  //   objects.forEach(obj => {
+  //     const parts = obj.key.split('/');
+  //     // const fileName = parts[parts.length - 1];
+  //     const folderPath = parts.slice(0, -1).join('/');
+  //     
+  //     if (!structure[folderPath]) {
+  //       structure[folderPath] = { folders: new Set(), files: [] };
+  //     }
+  //     
+  //     structure[folderPath].files.push(obj);
+  //     
+  //     // 親フォルダに子フォルダを登録
+  //     if (parts.length > 1) {
+  //       const parentPath = parts.slice(0, -2).join('/');
+  //       if (!structure[parentPath]) {
+  //         structure[parentPath] = { folders: new Set(), files: [] };
+  //       }
+  //       structure[parentPath].folders.add(folderPath);
+  //     }
+  //   });
+  //   
+  //   return structure;
+  // };
 
   // ファイルのソート
   const sortFiles = (files: S3Object[]) => {
@@ -1168,17 +1190,17 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
   };
 
   // フォルダ選択（フォルダ内の全ファイルを選択）
-  const handleFolderSelection = (folderPath: string, isSelected: boolean) => {
-    const structure = parseFileStructure(s3Objects.filter(obj => obj.storage_class === 'DEEP_ARCHIVE'));
-    const folderFiles = structure[folderPath]?.files || [];
-    
-    if (isSelected) {
-      setSelectedFiles(prev => [...new Set([...prev, ...folderFiles.map(f => f.key)])]);
-    } else {
-      const folderFileKeys = folderFiles.map(f => f.key);
-      setSelectedFiles(prev => prev.filter(key => !folderFileKeys.includes(key)));
-    }
-  };
+  // const handleFolderSelection = (folderPath: string, isSelected: boolean) => {
+  //   const structure = parseFileStructure(s3Objects.filter(obj => obj.storage_class === 'DEEP_ARCHIVE'));
+  //   const folderFiles = structure[folderPath]?.files || [];
+  //   
+  //   if (isSelected) {
+  //     setSelectedFiles(prev => [...new Set([...prev, ...folderFiles.map(f => f.key)])]);
+  //   } else {
+  //     const folderFileKeys = folderFiles.map(f => f.key);
+  //     setSelectedFiles(prev => prev.filter(key => !folderFileKeys.includes(key)));
+  //   }
+  // };
 
   // 復元リクエスト実行
   // ファイルダウンロード処理
@@ -1205,13 +1227,13 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
       const fileObject = s3Objects.find(obj => obj.key === fileKey);
       const awsConfig = getAwsConfigFromCredentials();
       
-      let result;
+      // let result;
       if (fileObject && (fileObject.storage_class === 'STANDARD' || fileObject.storage_class === 'STANDARD_IA')) {
         // Standard/Standard-IAファイルは直接ダウンロード
-        result = await TauriCommands.downloadS3File(fileKey, localPath, awsConfig);
+        await TauriCommands.downloadS3File(fileKey, localPath, awsConfig);
       } else {
         // Deep Archive/Glacierファイルは復元済みファイルダウンロード
-        result = await TauriCommands.downloadRestoredFile(fileKey, localPath, awsConfig);
+        await TauriCommands.downloadRestoredFile(fileKey, localPath, awsConfig);
       }
 
       handleRestoreSuccess(`ダウンロード完了: ${fileName} → ${localPath}`);
@@ -1284,7 +1306,7 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
   return (
     <div className="config-manager">
       <div className="config-header">
-        <h2>ReelVault</h2>
+        <h2>ReelVault{isDev() && ' (開発環境)'}</h2>
       </div>
 
       {error && (
@@ -1374,12 +1396,14 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
           >
             📦 リストア
           </button>
-          <button 
-            className={`tab ${activeTab === 'api_test' ? 'active' : ''}`}
-            onClick={() => setActiveTab('api_test')}
-          >
-            🧪 APIテスト
-          </button>
+          {isDev() && (
+            <button 
+              className={`tab ${activeTab === 'api_test' ? 'active' : ''}`}
+              onClick={() => setActiveTab('api_test')}
+            >
+              🧪 APIテスト
+            </button>
+          )}
         </div>
 
         <div className="config-content">
@@ -1526,11 +1550,8 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
                   value={config.app_settings.log_level}
                   onChange={(e) => updateConfigValue('app_settings.log_level', e.target.value)}
                 >
-                  <option value="error">Error</option>
-                  <option value="warn">Warning</option>
-                  <option value="info">Info</option>
-                  <option value="debug">Debug</option>
-                  <option value="trace">Trace</option>
+                  <option value="info">Info（標準）</option>
+                  <option value="debug">Debug（詳細）</option>
                 </select>
               </div>
 
@@ -2358,7 +2379,7 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
               )}
             </div>
           )}
-          {activeTab === 'api_test' && (
+          {isDev() && activeTab === 'api_test' && (
             <div className="api-test-container">
               <div className="section">
                 <h2>Command API テスト</h2>
