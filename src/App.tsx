@@ -56,13 +56,9 @@ function App() {
     TauriCommands.getAppState().then(setAppState);
   };
 
-
-
   const handleHealthStatusChange = (status: { isHealthy: boolean; lastCheck: Date | null; bucketName: string | undefined }) => {
     setHealthStatus(status);
   };
-
-
 
   if (isLoading) {
     return <div className="app-status">読み込み中...</div>;

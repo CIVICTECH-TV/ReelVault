@@ -7,6 +7,11 @@
   height: 100%;
   display: flex;
   flex-direction: column;
+  /* フォントレンダリング統一 */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "liga" 1, "kern" 1;
 }
 
 .config-manager.loading {

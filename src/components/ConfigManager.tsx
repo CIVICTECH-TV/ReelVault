@@ -10,10 +10,12 @@ import {
   PermissionCheck,
   LifecyclePolicyStatus,
   AwsConfig,
-  S3Object
+  S3Object,
+  UploadItem
 } from '../types/tauri-commands';
 import { AWS_REGIONS, DEFAULT_REGION } from '../constants/aws-regions';
 // RestoreManagerは直接統合済み
+import { UploadManager } from './UploadManager';
 import './ConfigManager.css';
 
 interface ConfigManagerProps {
@@ -25,7 +27,7 @@ interface ConfigManagerProps {
   onHealthStatusChange?: (status: { isHealthy: boolean; lastCheck: Date | null; bucketName: string | undefined }) => void;
 }
 
-type ActiveTab = 'status' | 'api_test' | 'auth' | 'app' | 'aws_settings' | 'restore';
+type ActiveTab = 'status' | 'api_test' | 'auth' | 'app' | 'aws_settings' | 'restore' | 'upload';
 
 export const ConfigManager: React.FC<ConfigManagerProps> = ({ 
   initialConfig,
@@ -1361,6 +1363,12 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
             ☁️ AWS S3設定
           </button>
           <button 
+            className={`tab ${activeTab === 'upload' ? 'active' : ''}`}
+            onClick={() => setActiveTab('upload')}
+          >
+            💾 バックアップ
+          </button>
+          <button 
             className={`tab ${activeTab === 'restore' ? 'active' : ''}`}
             onClick={() => setActiveTab('restore')}
           >
@@ -1900,6 +1908,40 @@ export const ConfigManager: React.FC<ConfigManagerProps> = ({
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+          {activeTab === 'upload' && (
+            <div className="config-section">
+              {(() => {
+                const hasValidCredentials = credentials.access_key_id && 
+                                          credentials.secret_access_key && 
+                                          credentials.region;
+                console.log('🔍 ConfigManager認証情報状態:', {
+                  access_key_id: credentials.access_key_id ? '設定済み' : '未設定',
+                  secret_access_key: credentials.secret_access_key ? '設定済み' : '未設定',
+                  region: credentials.region || '未設定',
+                  bucket_name: config.user_preferences.default_bucket_name || '未設定',
+                  hasValidCredentials
+                });
+                return null;
+              })()}
+              <UploadManager
+                awsCredentials={
+                  credentials.access_key_id && 
+                  credentials.secret_access_key && 
+                  credentials.region 
+                    ? credentials 
+                    : undefined
+                }
+                bucketName={config.user_preferences.default_bucket_name}
+                onUploadComplete={(items: UploadItem[]) => {
+                  console.log('アップロード完了:', items);
+                  // 必要に応じて状態更新やコールバック実行
+                }}
+                onError={(error: string) => {
+                  setError(error);
+                }}
+              />
             </div>
           )}
           {activeTab === 'restore' && (

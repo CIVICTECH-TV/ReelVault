@@ -230,22 +230,58 @@ export class UploadService {
   }
 
   /**
-   * デフォルトのアップロード設定を生成
+   * 統一されたアップロード設定を生成
+   * @param awsCredentials AWS認証情報
+   * @param bucketName S3バケット名
+   * @param tier アップロード機能ティア（デフォルト: Premium）
    */
   public static createDefaultConfig(
     awsCredentials: AwsCredentials,
-    bucketName: string
+    bucketName: string,
+    tier: 'Free' | 'Premium' = 'Premium'
   ): UploadConfig {
-    return {
+    // 基本設定（共通）
+    const baseConfig = {
       aws_credentials: awsCredentials,
       bucket_name: bucketName,
-      max_concurrent_uploads: 3,
-      chunk_size_mb: 10,
-      retry_attempts: 3,
-      timeout_seconds: 300,
       auto_create_metadata: true,
       s3_key_prefix: 'uploads',
     };
+
+    // ティア別設定
+    if (tier === 'Free') {
+      return {
+        ...baseConfig,
+        // 無料版制限
+        max_concurrent_uploads: 1,      // 1ファイルずつ
+        chunk_size_mb: 5,               // 5MB固定
+        retry_attempts: 3,              // 3回まで
+        timeout_seconds: 600,           // 10分
+        max_concurrent_parts: 1,        // チャンクも1つずつ（順次処理）
+        adaptive_chunk_size: false,     // 固定サイズ
+        min_chunk_size_mb: 5,          // 5MB固定
+        max_chunk_size_mb: 5,          // 5MB固定
+        bandwidth_limit_mbps: undefined, // 制限なし
+        enable_resume: false,           // 再開機能なし
+        tier: 'Free',
+      };
+    } else {
+      return {
+        ...baseConfig,
+        // プレミアム版機能
+        max_concurrent_uploads: 8,      // 8ファイル同時
+        chunk_size_mb: 10,              // デフォルト10MB
+        retry_attempts: 10,             // 10回まで
+        timeout_seconds: 1800,          // 30分
+        max_concurrent_parts: 8,        // 8チャンク並列
+        adaptive_chunk_size: true,      // 動的最適化
+        min_chunk_size_mb: 5,          // 最小5MB（S3制限準拠）
+        max_chunk_size_mb: 100,        // 最大100MB
+        bandwidth_limit_mbps: undefined, // 制限なし（設定可能）
+        enable_resume: true,            // 再開機能あり
+        tier: 'Premium',
+      };
+    }
   }
 
   /**

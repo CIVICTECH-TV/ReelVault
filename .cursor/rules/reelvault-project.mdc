@@ -231,7 +231,219 @@ if __name__ == "__main__":
 - **安全な操作**: ファイルベースでのGitHub API利用
 - **復旧手順**: 問題発生時の即座対応
 
+## 🚨 UI開発における重要な注意事項
+
+### **新しいUIコンポーネント作成時の必須チェックリスト**
+
+新しいUIコンポーネントを作成する際は、以下の手順を**必ず**実行すること：
+
+#### **1. ファイル作成前の確認**
+- [ ] 既存の類似コンポーネントがないか確認
+- [ ] コンポーネント名が既存のものと重複していないか確認
+- [ ] 作成するコンポーネントが本当に必要か検討
+
+#### **2. コンポーネント作成時**
+- [ ] **最終的な名前**で最初から作成する（後で名前変更しない）
+- [ ] **一意で明確な名前**を使用する（`Simple*`、`Test*`などの仮名は避ける）
+- [ ] TypeScript型定義を正しく設定する
+- [ ] 必要なimportを全て含める
+- [ ] **既存デザインシステムを踏襲**する（カラーパレット、フォント、スペーシング）
+- [ ] **テーマ設定に対応**する（ダーク/ライトテーマ切り替え考慮）
+
+#### **3. 統合時の必須確認**
+- [ ] 親コンポーネントでの**import文**が正しいか確認
+- [ ] 親コンポーネントでの**使用箇所**が正しいか確認
+- [ ] **型定義の整合性**を確認
+- [ ] **プロパティの受け渡し**が正しいか確認
+
+#### **4. 不要ファイル削除時の必須確認**
+- [ ] 削除対象ファイルを**全て特定**する
+- [ ] 削除対象ファイルへの**全ての参照**を特定する
+- [ ] **import文**を全て修正・削除する
+- [ ] **使用箇所**を全て修正・削除する
+- [ ] **型定義**の参照を全て確認する
+
+### **よくある失敗パターンと対策**
+
+#### **❌ 失敗パターン1: 仮名でコンポーネント作成**
+```typescript
+// ❌ 悪い例
+SimpleUpload.tsx → UploadManager.tsx に後で変更
+SimpleProgressTest.tsx → 後で削除
+```
+
+#### **✅ 正しいアプローチ**
+```typescript
+// ✅ 良い例
+最初から UploadManager.tsx で作成
+テスト用なら UploadManagerTest.tsx（明確に区別）
+```
+
+#### **❌ 失敗パターン2: 参照の修正漏れ**
+```typescript
+// ❌ ファイル削除後も参照が残る
+import { SimpleUploadManager } from './SimpleUploadManager'; // ファイルが存在しない
+<SimpleUploadManager /> // コンポーネントが存在しない
+```
+
+#### **✅ 正しいアプローチ**
+```typescript
+// ✅ 削除前に全参照を確認・修正
+1. grep検索で全参照を特定
+2. import文を全て修正
+3. 使用箇所を全て修正
+4. 型定義を確認
+5. 最後にファイル削除
+```
+
+### **必須ツールの活用**
+
+#### **参照確認コマンド**
+```bash
+# ファイル削除前に必ず実行
+grep -r "ComponentName" src/
+grep -r "component-file-name" src/
+```
+
+#### **TypeScriptエラーの確認**
+```bash
+# 修正後に必ず実行
+npm run type-check
+# または
+tsc --noEmit
+```
+
+### **開発フローの改善**
+
+#### **段階的開発アプローチ**
+1. **設計フェーズ**: コンポーネント構造を事前に設計
+2. **命名フェーズ**: 最終的な名前を決定
+3. **作成フェーズ**: 正しい名前で一度に作成
+4. **統合フェーズ**: 参照関係を正しく設定
+5. **テストフェーズ**: 動作確認
+6. **クリーンアップフェーズ**: 不要ファイルの安全な削除
+
+#### **品質チェックポイント**
+- [ ] コンパイルエラーなし
+- [ ] TypeScriptエラーなし
+- [ ] 実行時エラーなし
+- [ ] 不要ファイルなし
+- [ ] 未使用import文なし
+- [ ] **デザイン統一性**確認（既存コンポーネントとの一貫性）
+- [ ] **テーマ対応**確認（ダーク/ライトテーマでの表示確認）
+- [ ] **レスポンシブ対応**確認（異なる画面サイズでの表示確認）
+
+### **緊急時の対処法**
+
+#### **参照エラーが発生した場合**
+1. エラーメッセージから対象ファイル・行を特定
+2. 正しいimport文に修正
+3. 正しいコンポーネント名に修正
+4. 型定義を確認・修正
+5. 再コンパイル・テスト
+
+#### **大量の参照エラーが発生した場合**
+1. 一度に全て修正しようとしない
+2. 一つずつ確実に修正
+3. 各修正後にコンパイル確認
+4. 動作テスト実行
+
+### **ReelVaultデザインシステム準拠**
+
+#### **カラーパレット（ダークテーマベース）**
+```css
+/* 基本色 */
+--bg-primary: #1a1a1a;        /* メイン背景 */
+--bg-secondary: #2a2a2a;      /* セカンダリ背景 */
+--bg-tertiary: #333333;       /* サードレベル背景 */
+
+/* テキスト色 */
+--text-primary: #ffffff;      /* メインテキスト */
+--text-secondary: #cccccc;    /* セカンダリテキスト */
+--text-muted: #888888;        /* 補助テキスト */
+
+/* アクセント色 */
+--accent-primary: #4CAF50;    /* 成功・プライマリアクション */
+--accent-secondary: #2196F3;  /* 情報・セカンダリアクション */
+--accent-warning: #ff9800;    /* 警告 */
+--accent-error: #f44336;      /* エラー */
+
+/* ボーダー・区切り線 */
+--border-primary: #444444;    /* メインボーダー */
+--border-secondary: #555555;  /* セカンダリボーダー */
+```
+
+#### **統一コンポーネントスタイル**
+```css
+/* ボタンスタイル */
+.btn-primary {
+  background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 20px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.btn-secondary {
+  background: linear-gradient(135deg, #666 0%, #555 100%);
+  color: white;
+  border: 2px solid #777;
+  border-radius: 8px;
+  padding: 8px 18px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+/* 入力フィールド */
+.input-field {
+  background: #2a2a2a;
+  border: 2px solid #555;
+  border-radius: 6px;
+  color: #ffffff;
+  padding: 8px 12px;
+  transition: border-color 0.3s ease;
+}
+
+.input-field:focus {
+  border-color: #4CAF50;
+  outline: none;
+}
+
+/* パネル・カード */
+.panel {
+  background: linear-gradient(135deg, #2a2a2a 0%, #1e1e1e 100%);
+  border: 2px solid #444;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+```
+
+#### **必須デザイン要素**
+- [ ] **グラデーション背景**: `linear-gradient(135deg, ...)`を使用
+- [ ] **角丸**: `border-radius: 8px`以上を使用
+- [ ] **シャドウ**: `box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3)`
+- [ ] **トランジション**: `transition: all 0.3s ease`でスムーズなアニメーション
+- [ ] **アイコン**: 絵文字アイコンを積極的に使用（🎯、⚙️、📁など）
+
+#### **テーマ対応の実装**
+```typescript
+// テーマコンテキストの使用例
+const theme = useTheme(); // ダーク/ライトテーマの状態取得
+
+// CSS変数での動的テーマ切り替え
+const themeStyles = {
+  backgroundColor: theme.isDark ? '#1a1a1a' : '#ffffff',
+  color: theme.isDark ? '#ffffff' : '#000000',
+};
+```
+
 ---
 
 このルールは ReelVault プロジェクトでの GitHub Issues 管理・Tauri開発経験に基づいて作成されました。
 技術移行、Issue階層化、進捗管理、自動化、問題解決の実践的ノウハウをまとめています。
+
+**重要**: これらのルールは実際の開発で発生した問題を基に作成されています。
+同じ過ちを繰り返さないよう、新しいUI開発時は必ずこのチェックリストを参照してください。

@@ -10,6 +10,10 @@ ReelVaultプロジェクトの包括的なドキュメントコレクション
   - 包括的監視タイミング（起動時・定期・アップロード前）
   - Backend/Frontend統合実装
   - エラーハンドリング・ベストプラクティス
+- **`UPLOAD_DOWNLOAD_FEATURE_LIMITS.md`**: アップロード・ダウンロード機能制限実装
+  - 無料版・プレミアム版機能制限マトリックス
+  - フィーチャーフラグシステム・制限チェック機能
+  - AWS S3コンソール相当の無料機能実装
 
 #### `api/`
 - **`tauri-command-api.md`**: Tauri Command API仕様書

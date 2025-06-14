@@ -8,6 +8,7 @@ use tokio::sync::mpsc;
 use tokio::time::sleep;
 use uuid::Uuid;
 
+
 use crate::commands::aws_auth::AwsCredentials;
 use crate::commands::metadata::create_file_metadata;
 
@@ -65,7 +66,103 @@ pub struct UploadConfig {
     pub timeout_seconds: u64,
     pub auto_create_metadata: bool,
     pub s3_key_prefix: Option<String>,
+    
+    // 🎯 統一システム用の制限パラメータ
+    pub max_concurrent_parts: usize,        // チャンクレベル並列度（無料版: 1, プレミアム版: 4-8）
+    pub adaptive_chunk_size: bool,          // 動的チャンクサイズ（無料版: false, プレミアム版: true）
+    pub min_chunk_size_mb: u64,            // 最小チャンクサイズ（無料版: 5MB固定）
+    pub max_chunk_size_mb: u64,            // 最大チャンクサイズ（無料版: 5MB固定）
+    pub bandwidth_limit_mbps: Option<f64>,  // 帯域制限（無料版: なし, プレミアム版: 設定可能）
+    pub enable_resume: bool,                // 中断・再開機能（無料版: false, プレミアム版: true）
+    pub tier: UploadTier,                   // 機能ティア
 }
+
+/// アップロード機能ティア
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub enum UploadTier {
+    Free,     // 無料版
+    Premium,  // プレミアム版
+}
+
+impl UploadConfig {
+    /// 統一されたアップロード設定を生成
+    /// @param aws_credentials AWS認証情報
+    /// @param bucket_name S3バケット名
+    /// @param tier アップロード機能ティア（デフォルト: Premium）
+    pub fn new(aws_credentials: AwsCredentials, bucket_name: String, tier: UploadTier) -> Self {
+        // 基本設定（共通）
+        let base_config = Self {
+            aws_credentials,
+            bucket_name,
+            auto_create_metadata: true,
+            s3_key_prefix: Some("uploads".to_string()),
+            tier,
+            // 以下はティア別で上書き
+            max_concurrent_uploads: 1,
+            chunk_size_mb: 5,
+            retry_attempts: 3,
+            timeout_seconds: 600,
+            max_concurrent_parts: 1,
+            adaptive_chunk_size: false,
+            min_chunk_size_mb: 5,
+            max_chunk_size_mb: 5,
+            bandwidth_limit_mbps: None,
+            enable_resume: false,
+        };
+
+        match tier {
+            UploadTier::Free => Self {
+                // 無料版制限
+                max_concurrent_uploads: 1,      // 1ファイルずつ
+                chunk_size_mb: 5,               // 5MB固定
+                retry_attempts: 3,              // 3回まで
+                timeout_seconds: 600,           // 10分
+                max_concurrent_parts: 1,        // チャンクも1つずつ（順次処理）
+                adaptive_chunk_size: false,     // 固定サイズ
+                min_chunk_size_mb: 5,          // 5MB固定
+                max_chunk_size_mb: 5,          // 5MB固定
+                bandwidth_limit_mbps: None,     // 制限なし
+                enable_resume: false,           // 再開機能なし
+                ..base_config
+            },
+            UploadTier::Premium => Self {
+                // プレミアム版機能
+                max_concurrent_uploads: 8,      // 8ファイル同時
+                chunk_size_mb: 10,              // デフォルト10MB
+                retry_attempts: 10,             // 10回まで
+                timeout_seconds: 1800,          // 30分
+                max_concurrent_parts: 8,        // 8チャンク並列
+                adaptive_chunk_size: true,      // 動的最適化
+                min_chunk_size_mb: 5,          // 最小5MB（S3制限準拠）
+                max_chunk_size_mb: 100,        // 最大100MB
+                bandwidth_limit_mbps: None,     // 制限なし（設定可能）
+                enable_resume: true,            // 再開機能あり
+                ..base_config
+            }
+        }
+    }
+    
+    /// 現在の設定が無料版制限内かチェック
+    pub fn validate_free_tier_limits(&self) -> Result<(), String> {
+        if self.tier == UploadTier::Free {
+            if self.max_concurrent_uploads > 1 {
+                return Err("無料版では同時アップロードは1ファイルまでです".to_string());
+            }
+            if self.max_concurrent_parts > 1 {
+                return Err("無料版ではチャンク並列処理はできません".to_string());
+            }
+            if self.adaptive_chunk_size {
+                return Err("無料版では動的チャンクサイズは利用できません".to_string());
+            }
+            if self.chunk_size_mb != 5 || self.min_chunk_size_mb != 5 || self.max_chunk_size_mb != 5 {
+                return Err("無料版ではチャンクサイズは5MB固定です".to_string());
+            }
+        }
+        Ok(())
+    }
+}
+
+
 
 /// アップロードキューの管理
 #[derive(Debug)]
@@ -76,6 +173,8 @@ pub struct UploadQueue {
     pub is_processing: bool,
     pub total_uploaded_bytes: u64,
     pub total_files_uploaded: u64,
+    /// 厳格な同時実行制御のための専用カウンター
+    pub active_upload_count: usize,
 }
 
 impl UploadQueue {
@@ -87,7 +186,135 @@ impl UploadQueue {
             is_processing: false,
             total_uploaded_bytes: 0,
             total_files_uploaded: 0,
+            active_upload_count: 0,
         }
+    }
+    
+    /// 安全な同時実行数取得
+    pub fn get_active_upload_count(&self) -> usize {
+        // 複数の状態を確認して最も正確な値を返す
+        let in_progress_count = self.items.iter()
+            .filter(|item| item.status == UploadStatus::InProgress)
+            .count();
+        let active_uploads_count = self.active_uploads.len();
+        
+        // 最大値を使用（より保守的なアプローチ）
+        std::cmp::max(
+            std::cmp::max(in_progress_count, active_uploads_count),
+            self.active_upload_count
+        )
+    }
+    
+    /// アップロード開始時の状態更新
+    pub fn start_upload(&mut self, item_id: &str) -> Result<(), String> {
+        if let Some(config) = &self.config {
+            let current_active = self.get_active_upload_count();
+            
+            // 無料版の厳格な制限チェック
+            if config.max_concurrent_uploads == 1 && current_active > 0 {
+                return Err(format!("無料版では同時アップロードは1つまでです。現在アクティブ: {}", current_active));
+            }
+            
+            if current_active >= config.max_concurrent_uploads {
+                return Err(format!("同時アップロード数の上限に達しています: {}/{}", 
+                                 current_active, config.max_concurrent_uploads));
+            }
+        }
+        
+        // 状態を更新
+        if let Some(item) = self.items.iter_mut().find(|i| i.id == item_id) {
+            item.status = UploadStatus::InProgress;
+            item.started_at = Some(chrono::Utc::now().to_rfc3339());
+            self.active_upload_count += 1;
+            
+            log::info!("Upload started: {} (active count: {})", item_id, self.active_upload_count);
+            Ok(())
+        } else {
+            Err(format!("Upload item not found: {}", item_id))
+        }
+    }
+    
+    /// アップロード完了時の状態更新
+    pub fn complete_upload(&mut self, item_id: &str, success: bool, error_msg: Option<String>) {
+        log::info!("🔧 complete_upload called: {} (success: {})", item_id, success);
+        
+        // アイテムの現在の状態をチェック
+        let current_status = self.items.iter()
+            .find(|i| i.id == item_id)
+            .map(|i| i.status.clone());
+        
+        if let Some(status) = &current_status {
+            if *status == UploadStatus::Completed {
+                log::info!("⚠️  Upload already completed, skipping duplicate cleanup: {}", item_id);
+                return;
+            }
+        }
+        
+        // アクティブカウントを減らす（重複減算を防ぐ）
+        let was_active = self.active_uploads.contains_key(item_id) || 
+                        current_status == Some(UploadStatus::InProgress);
+        
+        log::info!("🔍 Cleanup state check - was_active: {}, active_uploads contains: {}, current_status: {:?}", 
+                   was_active, self.active_uploads.contains_key(item_id), current_status);
+        
+        if was_active && self.active_upload_count > 0 {
+            self.active_upload_count -= 1;
+            log::info!("🔽 Active upload count decreased: {} -> {}", 
+                       self.active_upload_count + 1, self.active_upload_count);
+        }
+        
+        // active_uploadsから削除（成功・失敗に関わらず必ず削除）
+        let removed = self.active_uploads.remove(item_id);
+        log::info!("🗑️  Removing from active_uploads: {} (was present: {})", item_id, removed.is_some());
+        
+        // アイテムの状態を更新
+        if let Some(item) = self.items.iter_mut().find(|i| i.id == item_id) {
+            if success {
+                item.status = UploadStatus::Completed;
+                item.completed_at = Some(chrono::Utc::now().to_rfc3339());
+                item.progress = 100.0;
+                self.total_files_uploaded += 1;
+                self.total_uploaded_bytes += item.file_size;
+                log::info!("✅ Upload marked as completed: {} ({})", item.file_name, item_id);
+            } else {
+                item.status = UploadStatus::Failed;
+                item.error_message = error_msg;
+                log::error!("❌ Upload marked as failed: {} ({})", item.file_name, item_id);
+            }
+        }
+        
+        log::info!("📊 Upload completion summary - Active count: {}, Active uploads: {}, Items in progress: {}", 
+                   self.active_upload_count, 
+                   self.active_uploads.len(),
+                   self.items.iter().filter(|i| i.status == UploadStatus::InProgress).count());
+    }
+    
+    /// 無料版制限チェック
+    pub fn check_free_tier_limits(&self, new_files_count: usize) -> Result<(), String> {
+        if let Some(config) = &self.config {
+            if config.max_concurrent_uploads == 1 {
+                // 無料版の場合
+                let current_active = self.get_active_upload_count();
+                let pending_count = self.items.iter()
+                    .filter(|item| item.status == UploadStatus::Pending)
+                    .count();
+                
+                if current_active > 0 && new_files_count > 0 {
+                    return Err(format!(
+                        "無料版では同時処理に制限があります。現在処理中: {}ファイル。完了後に追加してください。",
+                        current_active
+                    ));
+                }
+                
+                if pending_count > 0 && new_files_count > 0 {
+                    return Err(format!(
+                        "無料版では待機中のファイルがある場合、新しいファイルを追加できません。待機中: {}ファイル",
+                        pending_count
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -130,40 +357,80 @@ pub async fn initialize_upload_queue(
     config: UploadConfig,
     queue_state: State<'_, UploadQueueState>,
 ) -> Result<String, String> {
+    // 🔍 受信した設定をデバッグ出力
+    log::info!("🔧 受信した設定: tier={:?}, chunk_size_mb={}, max_concurrent_uploads={}, max_concurrent_parts={}, adaptive_chunk_size={}, min_chunk_size_mb={}, max_chunk_size_mb={}", 
+               config.tier, config.chunk_size_mb, config.max_concurrent_uploads, config.max_concurrent_parts, 
+               config.adaptive_chunk_size, config.min_chunk_size_mb, config.max_chunk_size_mb);
+    
     let mut queue = queue_state.lock()
         .map_err(|e| format!("Failed to lock upload queue: {}", e))?;
     
-    queue.config = Some(config.clone());
+    queue.config = Some(config);
+    queue.items.clear();
+    queue.active_uploads.clear();
+    queue.is_processing = false;
     
-    log::info!("Upload queue initialized with bucket: {}", config.bucket_name);
-    Ok("Upload queue initialized successfully".to_string())
+    log::info!("Upload queue initialized successfully");
+    Ok("Upload queue initialized".to_string())
 }
 
 /// ファイル選択ダイアログを開く
 #[command]
 pub async fn open_file_dialog(
+    app_handle: AppHandle,
     multiple: bool,
     _file_types: Option<Vec<String>>,
 ) -> Result<FileSelection, String> {
-    // TODO: Tauri v2のファイルダイアログAPIに更新
+    use tauri_plugin_dialog::DialogExt;
+    use std::sync::mpsc;
     
-    // TODO: Tauri v2のファイルダイアログAPIに更新
-    // 現在はモック実装
-    let selected_files = if multiple {
-        vec![
-            "/Users/test/video1.mp4".to_string(),
-            "/Users/test/video2.mov".to_string(),
-        ]
+    log::info!("Opening file dialog, multiple: {}", multiple);
+    
+    let (tx, rx) = mpsc::channel();
+    
+    if multiple {
+        // 複数ファイル選択
+        app_handle.dialog().file().pick_files(move |file_paths| {
+            let _ = tx.send(file_paths);
+        });
     } else {
-        vec!["/Users/test/video1.mp4".to_string()]
+        // 単一ファイル選択
+        app_handle.dialog().file().pick_file(move |file_path| {
+            let paths = file_path.map(|p| vec![p]);
+            let _ = tx.send(paths);
+        });
+    }
+    
+    // 結果を待機
+    let selected_paths = match rx.recv() {
+        Ok(Some(paths)) => paths,
+        Ok(None) => {
+            log::info!("No files selected");
+            return Ok(FileSelection {
+                file_count: 0,
+                total_size: 0,
+                selected_files: vec![],
+            });
+        }
+        Err(e) => {
+            return Err(format!("Failed to receive file dialog result: {}", e));
+        }
     };
     
+    let mut selected_files = Vec::new();
     let mut total_size = 0u64;
-    for file_path in &selected_files {
-        if let Ok(metadata) = std::fs::metadata(file_path) {
+    
+    for path in selected_paths {
+        let path_str = path.to_string();
+        selected_files.push(path_str.clone());
+        
+        if let Ok(metadata) = std::fs::metadata(&path_str) {
             total_size += metadata.len();
         }
     }
+    
+    log::info!("File dialog result: {} files selected, total size: {} bytes", 
+               selected_files.len(), total_size);
     
     Ok(FileSelection {
         file_count: selected_files.len() as u32,
@@ -178,18 +445,19 @@ pub async fn add_files_to_upload_queue(
     file_paths: Vec<String>,
     s3_key_config: S3KeyConfig,
     queue_state: State<'_, UploadQueueState>,
-) -> Result<Vec<String>, String> {
+) -> Result<String, String> {
     let mut queue = queue_state.lock()
         .map_err(|e| format!("Failed to lock upload queue: {}", e))?;
     
-    let mut added_ids = Vec::new();
+    // 無料版制限チェック
+    queue.check_free_tier_limits(file_paths.len())?;
+    
+    let mut added_files = Vec::new();
     
     for file_path in file_paths {
         let path = Path::new(&file_path);
-        
-        // ファイル存在確認
         if !path.exists() {
-            log::warn!("File does not exist: {}", file_path);
+            log::warn!("File does not exist, skipping: {}", file_path);
             continue;
         }
         
@@ -198,7 +466,7 @@ pub async fn add_files_to_upload_queue(
         
         let file_name = path.file_name()
             .and_then(|s| s.to_str())
-            .unwrap_or("unknown")
+            .unwrap_or("Unknown")
             .to_string();
         
         let s3_key = generate_s3_key(&file_path, &s3_key_config)?;
@@ -206,9 +474,9 @@ pub async fn add_files_to_upload_queue(
         let item = UploadItem {
             id: Uuid::new_v4().to_string(),
             file_path: file_path.clone(),
-            file_name,
+            file_name: file_name.clone(),
             file_size: metadata.len(),
-            s3_key: s3_key.clone(),
+            s3_key,
             status: UploadStatus::Pending,
             progress: 0.0,
             uploaded_bytes: 0,
@@ -221,13 +489,22 @@ pub async fn add_files_to_upload_queue(
             retry_count: 0,
         };
         
-        added_ids.push(item.id.clone());
         queue.items.push(item);
+        added_files.push(file_name);
         
-        log::info!("Added file to upload queue: {} -> {}", file_path, s3_key);
+        log::info!("Added file to upload queue: {}", file_path);
     }
     
-    Ok(added_ids)
+    if added_files.is_empty() {
+        return Err("No valid files were added to the upload queue".to_string());
+    }
+    
+    let message = format!("Added {} files to upload queue: {}", 
+                         added_files.len(), 
+                         added_files.join(", "));
+    
+    log::info!("{}", message);
+    Ok(message)
 }
 
 /// アップロードキューからアイテムを削除
@@ -279,6 +556,14 @@ pub async fn start_upload_processing(
     queue.is_processing = true;
     drop(queue); // ロックを解放
     
+    // テスト用のイベント送信
+    log::info!("Sending test event to frontend");
+    if let Err(e) = app_handle.emit("test-event", "Upload processing starting") {
+        log::error!("Failed to emit test event: {}", e);
+    } else {
+        log::info!("Test event emitted successfully");
+    }
+    
     // バックグラウンドでアップロード処理を開始
     let queue_clone = Arc::clone(&queue_state.inner());
     let app_handle_clone = app_handle.clone();
@@ -286,9 +571,11 @@ pub async fn start_upload_processing(
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async move {
+            log::info!("Background upload processing thread started");
             if let Err(e) = process_upload_queue(queue_clone, app_handle_clone, config).await {
                 log::error!("Upload processing failed: {}", e);
             }
+            log::info!("Background upload processing thread finished");
         });
     });
     
@@ -418,9 +705,12 @@ fn generate_s3_key(file_path: &str, config: &S3KeyConfig) -> Result<String, Stri
     
     let mut key_parts = Vec::new();
     
-    // プレフィックスを追加
+    // プレフィックスを追加（末尾スラッシュを除去）
     if let Some(prefix) = &config.prefix {
-        key_parts.push(prefix.clone());
+        let clean_prefix = prefix.trim_end_matches('/');
+        if !clean_prefix.is_empty() {
+            key_parts.push(clean_prefix.to_string());
+        }
     }
     
     // 日付フォルダを追加
@@ -469,6 +759,15 @@ async fn process_upload_queue(
     app_handle: AppHandle,
     config: UploadConfig,
 ) -> Result<(), String> {
+    log::info!("🚀 process_upload_queue started with max_concurrent: {}", config.max_concurrent_uploads);
+    
+    // 開始時のテストイベント送信
+    if let Err(e) = app_handle.emit("test-event", "process_upload_queue started") {
+        log::error!("Failed to emit process start test event: {}", e);
+    } else {
+        log::info!("Process start test event emitted successfully");
+    }
+    
     let max_concurrent = config.max_concurrent_uploads;
     let (tx, mut rx) = mpsc::channel::<UploadProgress>(100);
     
@@ -482,27 +781,63 @@ async fn process_upload_queue(
             }
         }
         
-        // 待機中のアイテムを取得
+        // 新しいアップロードを開始できるかチェック
         let pending_items = {
             let mut queue = queue_state.lock()
                 .map_err(|e| format!("Failed to lock queue: {}", e))?;
             
-            let active_count = queue.active_uploads.len();
-            if active_count >= max_concurrent {
+            let current_active = queue.get_active_upload_count();
+            
+            log::info!("Concurrent upload check: {} active, max: {}", current_active, max_concurrent);
+            
+            if current_active >= max_concurrent {
+                log::info!("Max concurrent uploads reached ({}), waiting...", current_active);
                 drop(queue);
                 sleep(Duration::from_millis(1000)).await;
                 continue;
             }
             
-            let available_slots = max_concurrent - active_count;
+            let available_slots = max_concurrent.saturating_sub(current_active);
             let mut pending = Vec::new();
             
-            for item in queue.items.iter_mut() {
-                if item.status == UploadStatus::Pending && pending.len() < available_slots {
-                    item.status = UploadStatus::InProgress;
-                    item.started_at = Some(chrono::Utc::now().to_rfc3339());
-                    pending.push(item.clone());
+            // 無料版の場合は特に厳格に1つずつ処理
+            let max_new_uploads = if max_concurrent == 1 {
+                if current_active > 0 { 0 } else { 1 }
+            } else {
+                available_slots
+            };
+            
+            // Pendingアイテムを取得（借用の問題を回避するため、IDのみ収集）
+            let pending_item_ids: Vec<String> = queue.items.iter()
+                .filter(|item| item.status == UploadStatus::Pending)
+                .take(max_new_uploads)
+                .map(|item| item.id.clone())
+                .collect();
+            
+            // 状態を更新してアイテムを取得
+            for item_id in pending_item_ids {
+                match queue.start_upload(&item_id) {
+                    Ok(()) => {
+                        if let Some(item) = queue.items.iter().find(|i| i.id == item_id) {
+                            log::info!("Starting upload for: {} (slot {}/{})", 
+                                       item.file_name, pending.len() + 1, max_new_uploads);
+                            pending.push(item.clone());
+                            
+                            // 無料版では確実に1つずつ
+                            if max_concurrent == 1 {
+                                break;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to start upload for {}: {}", item_id, e);
+                        break;
+                    }
                 }
+            }
+            
+            if pending.is_empty() {
+                log::debug!("No pending items to process (active: {}, max: {})", current_active, max_concurrent);
             }
             
             pending
@@ -510,62 +845,156 @@ async fn process_upload_queue(
         
         // 新しいアップロードタスクを開始
         for item in pending_items {
-            let tx_clone = tx.clone();
+            let queue_state_clone = queue_state.clone();
             let config_clone = config.clone();
-            let queue_clone = Arc::clone(&queue_state);
-            let app_handle_clone = app_handle.clone();
+            let tx_clone = tx.clone();
+            let item_id = item.id.clone();
+            let file_name = item.file_name.clone();
             
             tokio::spawn(async move {
-                let result = upload_single_file(
-                    item.clone(),
+                log::info!("🔄 Starting upload task for: {} ({})", file_name, item_id);
+                
+                let result = upload_file_to_s3(
+                    item.file_path,
+                    item.s3_key,
                     config_clone,
                     tx_clone,
-                    app_handle_clone,
+                    item_id.clone(),
                 ).await;
                 
-                // 結果をキューに反映
-                if let Ok(mut queue) = queue_clone.lock() {
-                    if let Some(queue_item) = queue.items.iter_mut().find(|i| i.id == item.id) {
-                        match result {
-                            Ok(_) => {
-                                queue_item.status = UploadStatus::Completed;
-                                queue_item.progress = 100.0;
-                                queue_item.completed_at = Some(chrono::Utc::now().to_rfc3339());
-                                let file_size = queue_item.file_size;
-                                queue.total_files_uploaded += 1;
-                                queue.total_uploaded_bytes += file_size;
-                            }
-                            Err(e) => {
-                                queue_item.status = UploadStatus::Failed;
-                                queue_item.error_message = Some(e);
-                            }
+                let (success, error_msg) = match result {
+                    Ok(_) => (true, None),
+                    Err(e) => (false, Some(e)),
+                };
+                
+                // 新しい状態管理システムを使用してアップロード完了を記録
+                {
+                    let mut queue = queue_state_clone.lock().unwrap();
+                    // 既に完了済みかチェック（進捗更新で先に処理された場合）
+                    if let Some(item) = queue.items.iter().find(|i| i.id == item_id) {
+                        if item.status == UploadStatus::Completed {
+                            log::info!("✅ Upload already completed by progress update, skipping task cleanup: {}", item_id);
+                        } else {
+                            log::info!("🔄 Task completion: calling complete_upload for {}", item_id);
+                            queue.complete_upload(&item_id, success, error_msg.clone());
                         }
+                    } else {
+                        log::warn!("⚠️  Upload item not found during task completion: {}", item_id);
                     }
-                    queue.active_uploads.remove(&item.id);
+                }
+                
+                if success {
+                    log::info!("Upload task completed successfully: {} ({})", file_name, item_id);
+                } else {
+                    log::error!("Upload task failed: {} ({}), error: {}", file_name, item_id, error_msg.unwrap_or_default());
                 }
             });
         }
         
         // 進捗更新を処理
+        let mut progress_received = 0;
         while let Ok(progress) = rx.try_recv() {
+            progress_received += 1;
             {
                 let mut queue = queue_state.lock()
                     .map_err(|e| format!("Failed to lock queue: {}", e))?;
                 queue.active_uploads.insert(progress.item_id.clone(), progress.clone());
                 
                 // キューアイテムの進捗も更新
-                if let Some(item) = queue.items.iter_mut().find(|i| i.id == progress.item_id) {
-                    item.progress = progress.percentage;
-                    item.uploaded_bytes = progress.uploaded_bytes;
-                    item.speed_mbps = progress.speed_mbps;
-                    item.eta_seconds = progress.eta_seconds;
+                let (should_cleanup, file_name, file_size, is_success) = {
+                    if let Some(item) = queue.items.iter_mut().find(|i| i.id == progress.item_id) {
+                        let was_in_progress = item.status == UploadStatus::InProgress;
+                        
+                        item.progress = progress.percentage;
+                        item.uploaded_bytes = progress.uploaded_bytes;
+                        item.speed_mbps = progress.speed_mbps;
+                        item.eta_seconds = progress.eta_seconds;
+                        item.status = progress.status.clone();
+                        
+                        // 完了時（成功・失敗問わず）の判定と必要な値の取得
+                        let is_completed = matches!(progress.status, UploadStatus::Completed | UploadStatus::Failed);
+                        if is_completed && was_in_progress {
+                            if progress.status == UploadStatus::Completed {
+                                item.completed_at = Some(chrono::Utc::now().to_rfc3339());
+                            }
+                            (true, item.file_name.clone(), item.file_size, progress.status == UploadStatus::Completed)
+                        } else {
+                            (false, String::new(), 0, false)
+                        }
+                    } else {
+                        (false, String::new(), 0, false)
+                    }
+                };
+                
+                // 借用が終了した後でクリーンアップ処理
+                if should_cleanup {
+                    if is_success {
+                        log::info!("🎉 Upload 100% completed, performing immediate cleanup: {}", progress.item_id);
+                        queue.total_files_uploaded += 1;
+                        queue.total_uploaded_bytes += file_size;
+                    } else {
+                        log::info!("💥 Upload failed, performing immediate cleanup: {}", progress.item_id);
+                    }
+                    
+                    // アクティブカウントを減らす
+                    let old_count = queue.active_upload_count;
+                    if queue.active_upload_count > 0 {
+                        queue.active_upload_count -= 1;
+                        log::info!("🔽 Active upload count decreased: {} -> {}", 
+                                   old_count, queue.active_upload_count);
+                    }
+                    
+                    // active_uploadsから削除
+                    let removed = queue.active_uploads.remove(&progress.item_id);
+                    log::info!("🗑️  Removed from active_uploads: {} (was present: {})", progress.item_id, removed.is_some());
+                    
+                    if is_success {
+                        log::info!("✅ Upload completed and cleaned up: {} ({})", file_name, progress.item_id);
+                    } else {
+                        log::info!("❌ Upload failed and cleaned up: {} ({})", file_name, progress.item_id);
+                    }
+                    log::info!("📊 Cleanup summary - Active count: {}, Active uploads: {}", 
+                               queue.active_upload_count, queue.active_uploads.len());
                 }
             }
             
             // フロントエンドに進捗を通知
+            log::info!("Emitting progress event to frontend: {:.1}% for {}", 
+                       progress.percentage, progress.item_id);
             if let Err(e) = app_handle.emit("upload-progress", &progress) {
-                log::warn!("Failed to emit upload progress: {}", e);
+                log::error!("Failed to emit upload progress: {}", e);
+            } else {
+                log::info!("Progress event emitted successfully: {:.1}%", progress.percentage);
             }
+        }
+        
+        if progress_received > 0 {
+            log::info!("Processed {} progress updates in this cycle", progress_received);
+        }
+        
+        // アップロード停止検出とリカバリ
+        let (has_pending, has_active, all_completed) = {
+            let queue = queue_state.lock()
+                .map_err(|e| format!("Failed to lock queue: {}", e))?;
+            let pending = queue.items.iter().any(|item| item.status == UploadStatus::Pending);
+            let active = queue.get_active_upload_count() > 0;
+            let completed = queue.items.iter().all(|item| 
+                matches!(item.status, UploadStatus::Completed | UploadStatus::Failed | UploadStatus::Cancelled)
+            );
+            (pending, active, completed)
+        };
+        
+        // 全てのファイルが完了した場合は処理を停止
+        if all_completed && !has_active {
+            log::info!("All uploads completed, stopping upload processing");
+            let mut queue = queue_state.lock()
+                .map_err(|e| format!("Failed to lock queue: {}", e))?;
+            queue.is_processing = false;
+            break;
+        }
+        
+        if has_pending && !has_active {
+            log::warn!("Upload seems stalled: pending items found but no active uploads");
         }
         
         sleep(Duration::from_millis(500)).await;
@@ -575,17 +1004,45 @@ async fn process_upload_queue(
 }
 
 /// 単一ファイルのアップロード処理
-async fn upload_single_file(
-    item: UploadItem,
+async fn upload_file_to_s3(
+    file_path: String,
+    s3_key: String,
     config: UploadConfig,
     progress_tx: mpsc::Sender<UploadProgress>,
-    _app_handle: AppHandle,
-) -> Result<(), String> {
+    item_id: String,
+) -> Result<String, String> {
     use aws_config::{BehaviorVersion, Region};
     use aws_sdk_s3::Client as S3Client;
     use aws_credential_types::Credentials;
+    use std::path::Path;
+    use tokio::fs::File;
+    use tokio::io::AsyncReadExt;
     
-    log::info!("Starting upload: {} -> {}", item.file_path, item.s3_key);
+    log::info!("Starting upload for file: {} -> s3://{}/{}", file_path, config.bucket_name, s3_key);
+    
+    // 🔍 受信した設定の全詳細をデバッグ出力
+    log::info!("🔧 === アップロード設定詳細 ===");
+    log::info!("🔧 tier: {:?}", config.tier);
+    log::info!("🔧 chunk_size_mb: {}", config.chunk_size_mb);
+    log::info!("🔧 max_concurrent_uploads: {}", config.max_concurrent_uploads);
+    log::info!("🔧 max_concurrent_parts: {}", config.max_concurrent_parts);
+    log::info!("🔧 adaptive_chunk_size: {}", config.adaptive_chunk_size);
+    log::info!("🔧 min_chunk_size_mb: {}", config.min_chunk_size_mb);
+    log::info!("🔧 max_chunk_size_mb: {}", config.max_chunk_size_mb);
+    log::info!("🔧 retry_attempts: {}", config.retry_attempts);
+    log::info!("🔧 timeout_seconds: {}", config.timeout_seconds);
+    log::info!("🔧 enable_resume: {}", config.enable_resume);
+    log::info!("🔧 ========================");
+    
+    // ファイル存在確認
+    let path = Path::new(&file_path);
+    if !path.exists() {
+        return Err(format!("File does not exist: {}", file_path));
+    }
+    
+    let file_size = std::fs::metadata(&path)
+        .map_err(|e| format!("Failed to get file metadata: {}", e))?
+        .len();
     
     // AWS設定
     let region = Region::new(config.aws_credentials.region.clone());
@@ -597,82 +1054,83 @@ async fn upload_single_file(
         &config.aws_credentials.secret_access_key,
         config.aws_credentials.session_token.clone(),
         None,
-        "upload_system",
+        "upload",
     );
     
     config_builder = config_builder.credentials_provider(creds);
     let aws_config = config_builder.load().await;
     let s3_client = S3Client::new(&aws_config);
     
-    // ファイル読み込み
-    let file_path = Path::new(&item.file_path);
-    let file_size = item.file_size;
-    
-    // 進捗追跡用
     let start_time = Instant::now();
     let mut uploaded_bytes = 0u64;
     
-    // チャンクサイズ（MB -> バイト）
-    let chunk_size = (config.chunk_size_mb * 1024 * 1024) as usize;
+    // 進捗レポート用のクロージャ
+    let report_progress = |uploaded: u64, total: u64, speed_mbps: f64| {
+        let percentage = if total > 0 {
+            (uploaded as f64 / total as f64) * 100.0
+        } else {
+            0.0
+        };
+        
+        let eta_seconds = if speed_mbps > 0.0 {
+            let remaining_mb = (total - uploaded) as f64 / (1024.0 * 1024.0);
+            Some((remaining_mb / speed_mbps) as u64)
+        } else {
+            None
+        };
+        
+        let progress = UploadProgress {
+            item_id: item_id.clone(),
+            uploaded_bytes: uploaded,
+            total_bytes: total,
+            percentage,
+            speed_mbps,
+            eta_seconds,
+            status: if uploaded >= total {
+                UploadStatus::Completed
+            } else {
+                UploadStatus::InProgress
+            },
+        };
+        
+        if let Err(e) = progress_tx.try_send(progress) {
+            log::warn!("Failed to send progress update: {}", e);
+        }
+    };
     
-    // マルチパートアップロードの開始
-    let multipart_upload = s3_client
-        .create_multipart_upload()
-        .bucket(&config.bucket_name)
-        .key(&item.s3_key)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to create multipart upload: {}", e))?;
+    // S3制限準拠のチャンクサイズ設定（事前計算）
+    let configured_size = config.chunk_size_mb * 1024 * 1024;
+    let s3_min_size = 5 * 1024 * 1024; // 5MB
+    let effective_chunk_size = std::cmp::max(configured_size, s3_min_size);
     
-    let upload_id = multipart_upload.upload_id()
-        .ok_or("No upload ID returned")?;
+    // 🔍 チャンクサイズ計算の詳細をデバッグ出力
+    log::info!("🔧 === チャンクサイズ計算 ===");
+    log::info!("🔧 config.chunk_size_mb: {}", config.chunk_size_mb);
+    log::info!("🔧 configured_size (bytes): {}", configured_size);
+    log::info!("🔧 s3_min_size (bytes): {}", s3_min_size);
+    log::info!("🔧 effective_chunk_size (bytes): {}", effective_chunk_size);
+    log::info!("🔧 effective_chunk_size (MB): {}", effective_chunk_size / (1024 * 1024));
+    log::info!("🔧 ========================");
     
-    // ファイルを読み込んでチャンクごとにアップロード
-    use std::fs::File;
-    use std::io::{Read, BufReader};
+    if effective_chunk_size != configured_size {
+        log::warn!("⚠️ Chunk size adjusted for S3 compliance: {} MB -> {} MB", 
+                  configured_size / (1024 * 1024), effective_chunk_size / (1024 * 1024));
+    }
     
-    let file = File::open(file_path)
-        .map_err(|e| format!("Failed to open file: {}", e))?;
-    let mut reader = BufReader::new(file);
-    let mut buffer = vec![0u8; chunk_size];
-    let mut part_number = 1;
-    let mut completed_parts = Vec::new();
-    
-    loop {
-        let bytes_read = reader.read(&mut buffer)
+    // 小さなファイルの場合は単純アップロード（調整後のチャンクサイズで判定）
+    if file_size <= effective_chunk_size {
+        log::info!("Using simple upload for small file: {} bytes", file_size);
+        
+        let mut file = File::open(&path).await
+            .map_err(|e| format!("Failed to open file: {}", e))?;
+        
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer).await
             .map_err(|e| format!("Failed to read file: {}", e))?;
         
-        if bytes_read == 0 {
-            break; // EOF
-        }
+        uploaded_bytes = buffer.len() as u64;
         
-        // パートをアップロード
-        let part_data = &buffer[..bytes_read];
-        let upload_part_result = s3_client
-            .upload_part()
-            .bucket(&config.bucket_name)
-            .key(&item.s3_key)
-            .upload_id(upload_id)
-            .part_number(part_number)
-            .body(part_data.to_vec().into())
-            .send()
-            .await
-            .map_err(|e| format!("Failed to upload part {}: {}", part_number, e))?;
-        
-        if let Some(etag) = upload_part_result.e_tag() {
-            completed_parts.push(
-                aws_sdk_s3::types::CompletedPart::builder()
-                    .part_number(part_number)
-                    .e_tag(etag)
-                    .build()
-            );
-        }
-        
-        uploaded_bytes += bytes_read as u64;
-        part_number += 1;
-        
-        // 進捗を計算して送信
-        let percentage = (uploaded_bytes as f64 / file_size as f64) * 100.0;
+        // 進捗レポート
         let elapsed = start_time.elapsed().as_secs_f64();
         let speed_mbps = if elapsed > 0.0 {
             (uploaded_bytes as f64 / (1024.0 * 1024.0)) / elapsed
@@ -680,60 +1138,209 @@ async fn upload_single_file(
             0.0
         };
         
-        let eta_seconds = if speed_mbps > 0.0 {
-            let remaining_mb = (file_size - uploaded_bytes) as f64 / (1024.0 * 1024.0);
-            Some((remaining_mb / speed_mbps) as u64)
-        } else {
-            None
-        };
+        report_progress(uploaded_bytes, file_size, speed_mbps);
         
-        let progress = UploadProgress {
-            item_id: item.id.clone(),
-            uploaded_bytes,
-            total_bytes: file_size,
-            percentage,
-            speed_mbps,
-            eta_seconds,
-            status: UploadStatus::InProgress,
-        };
+        s3_client
+            .put_object()
+            .bucket(&config.bucket_name)
+            .key(&s3_key)
+            .body(buffer.into())
+            .send()
+            .await
+            .map_err(|e| format!("S3 upload failed: {}", e))?;
         
-        if let Err(e) = progress_tx.send(progress).await {
-            log::warn!("Failed to send progress update: {}", e);
+        log::info!("Simple upload completed: {} bytes", uploaded_bytes);
+        
+    } else {
+        // マルチパートアップロード
+        log::info!("Using multipart upload for large file: {} bytes", file_size);
+        
+        let create_response = s3_client
+            .create_multipart_upload()
+            .bucket(&config.bucket_name)
+            .key(&s3_key)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to create multipart upload: {}", e))?;
+        
+        let upload_id = create_response.upload_id()
+            .ok_or("No upload ID returned")?;
+        
+        // 事前計算されたチャンクサイズを使用
+        let chunk_size = effective_chunk_size;
+        let mut part_number = 1;
+        let mut completed_parts = Vec::new();
+        
+        let mut file = File::open(&path).await
+            .map_err(|e| format!("Failed to open file: {}", e))?;
+        
+        loop {
+            let mut buffer = vec![0u8; chunk_size as usize];
+            
+            // 🔍 バッファサイズをデバッグ出力
+            log::info!("🔧 Reading chunk: buffer_size={} bytes ({} MB)", 
+                       buffer.len(), buffer.len() / (1024 * 1024));
+            
+            // 完全にチャンクサイズを読み込むまでループ
+            let mut total_bytes_read = 0;
+            let mut temp_buffer = vec![0u8; chunk_size as usize];
+            
+            while total_bytes_read < chunk_size as usize {
+                let bytes_read = file.read(&mut temp_buffer[total_bytes_read..]).await
+                    .map_err(|e| format!("Failed to read file chunk: {}", e))?;
+                
+                if bytes_read == 0 {
+                    // ファイル終端に達した
+                    break;
+                }
+                
+                total_bytes_read += bytes_read;
+            }
+            
+            // 🔍 実際の読み込みサイズをデバッグ出力
+            log::info!("🔧 Read result: total_bytes_read={} bytes ({} MB)", 
+                       total_bytes_read, total_bytes_read / (1024 * 1024));
+            
+            if total_bytes_read == 0 {
+                break;
+            }
+            
+            // 実際に読み込んだサイズでバッファを調整
+            temp_buffer.truncate(total_bytes_read);
+            buffer = temp_buffer;
+            
+            let upload_part_response = s3_client
+                .upload_part()
+                .bucket(&config.bucket_name)
+                .key(&s3_key)
+                .upload_id(upload_id)
+                .part_number(part_number)
+                .body(buffer.into())
+                .send()
+                .await
+                .map_err(|e| format!("Failed to upload part {}: {}", part_number, e))?;
+            
+            let etag = upload_part_response.e_tag()
+                .ok_or(format!("No ETag for part {}", part_number))?;
+            
+            completed_parts.push(
+                aws_sdk_s3::types::CompletedPart::builder()
+                    .part_number(part_number)
+                    .e_tag(etag)
+                    .build()
+            );
+            
+            uploaded_bytes += total_bytes_read as u64;
+            part_number += 1;
+            
+            // 進捗レポート
+            let elapsed = start_time.elapsed().as_secs_f64();
+            let speed_mbps = if elapsed > 0.0 {
+                (uploaded_bytes as f64 / (1024.0 * 1024.0)) / elapsed
+            } else {
+                0.0
+            };
+            
+            report_progress(uploaded_bytes, file_size, speed_mbps);
+            
+            log::info!("Uploaded part {}: {} bytes (total: {}/{})", 
+                       part_number - 1, total_bytes_read, uploaded_bytes, file_size);
         }
         
-        // 小さな遅延を入れてCPU使用率を抑制
-        sleep(Duration::from_millis(10)).await;
+        // マルチパートアップロード完了（エラーハンドリング強化）
+        log::info!("🔧 Completing multipart upload with {} parts", completed_parts.len());
+        
+        // パーツを部品番号順にソート（重要）
+        let mut sorted_parts = completed_parts;
+        sorted_parts.sort_by_key(|part| part.part_number());
+        
+        // デバッグ情報（詳細）
+        log::info!("🔧 Preparing to complete multipart upload with {} parts:", sorted_parts.len());
+        for (i, part) in sorted_parts.iter().enumerate() {
+            log::info!("  Part {}: number={:?}, etag={:?}", 
+                       i + 1, part.part_number(), part.e_tag());
+            
+            // パーツ番号の検証
+            if part.part_number().is_none() {
+                log::error!("❌ Part {} has None part_number!", i + 1);
+            }
+            if part.e_tag().is_none() {
+                log::error!("❌ Part {} has None etag!", i + 1);
+            }
+        }
+        
+        let parts_count = sorted_parts.len();
+        let completed_upload = aws_sdk_s3::types::CompletedMultipartUpload::builder()
+            .set_parts(Some(sorted_parts))
+            .build();
+        
+        // リトライ付きマルチパート完了
+        let mut retry_count = 0;
+        let max_retries = 3;
+        
+        loop {
+            match s3_client
+                .complete_multipart_upload()
+                .bucket(&config.bucket_name)
+                .key(&s3_key)
+                .upload_id(upload_id)
+                .multipart_upload(completed_upload.clone())
+                .send()
+                .await
+            {
+                Ok(response) => {
+                    log::info!("✅ Multipart upload completed successfully: {:?}", response.location());
+                    break;
+                }
+                Err(e) => {
+                    retry_count += 1;
+                    
+                    // 詳細なエラー情報をログ出力
+                    log::error!("🔍 Multipart upload completion error details:");
+                    log::error!("  ├─ Error: {:?}", e);
+                    log::error!("  ├─ Bucket: {}", config.bucket_name);
+                    log::error!("  ├─ Key: {}", s3_key);
+                    log::error!("  ├─ Upload ID: {}", upload_id);
+                    log::error!("  ├─ Parts count: {}", parts_count);
+                    log::error!("  └─ Attempt: {}/{}", retry_count, max_retries);
+                    
+                    if retry_count > max_retries {
+                        log::error!("❌ Multipart upload completion failed after {} retries: {}", max_retries, e);
+                        return Err(format!("Failed to complete multipart upload after {} retries: {}", max_retries, e));
+                    }
+                    
+                    let delay = Duration::from_millis(1000 * retry_count as u64);
+                    log::warn!("⚠️ Multipart upload completion failed (attempt {}), retrying in {:?}: {}", 
+                              retry_count, delay, e);
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
+        
+        log::info!("Multipart upload completed: {} bytes in {} parts", uploaded_bytes, part_number - 1);
     }
     
-    // マルチパートアップロードを完了
-    let completed_multipart_upload = aws_sdk_s3::types::CompletedMultipartUpload::builder()
-        .set_parts(Some(completed_parts))
-        .build();
+    // 最終進捗レポート
+    let elapsed = start_time.elapsed().as_secs_f64();
+    let speed_mbps = if elapsed > 0.0 {
+        (uploaded_bytes as f64 / (1024.0 * 1024.0)) / elapsed
+    } else {
+        0.0
+    };
     
-    s3_client
-        .complete_multipart_upload()
-        .bucket(&config.bucket_name)
-        .key(&item.s3_key)
-        .upload_id(upload_id)
-        .multipart_upload(completed_multipart_upload)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to complete multipart upload: {}", e))?;
+    report_progress(uploaded_bytes, file_size, speed_mbps);
     
-    // メタデータ作成（オプション）
+    // メタデータ作成（設定されている場合）
     if config.auto_create_metadata {
         use std::collections::HashMap;
         let tags = vec!["upload".to_string()];
         let custom_fields = HashMap::new();
-        if let Err(e) = create_file_metadata(item.file_path.clone(), tags, custom_fields).await {
-            log::warn!("Failed to create metadata for {}: {}", item.file_path, e);
+        if let Err(e) = create_file_metadata(file_path.clone(), tags, custom_fields).await {
+            log::warn!("Failed to create metadata for {}: {}", s3_key, e);
         }
     }
     
-    log::info!("Upload completed: {} -> s3://{}/{}", 
-               item.file_path, config.bucket_name, item.s3_key);
-    
-    Ok(())
+    Ok(format!("Upload completed: {} bytes", uploaded_bytes))
 }
 
 /// アップロードキューをクリア
@@ -791,6 +1398,9 @@ pub async fn test_upload_config(config: UploadConfig) -> Result<String, String> 
     Ok(format!("Upload configuration test successful for bucket: {}", config.bucket_name))
 }
 
+
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -809,16 +1419,11 @@ mod tests {
     }
 
     fn create_test_upload_config() -> UploadConfig {
-        UploadConfig {
-            aws_credentials: create_test_credentials(),
-            bucket_name: "test-bucket".to_string(),
-            max_concurrent_uploads: 2,
-            chunk_size_mb: 5,
-            retry_attempts: 3,
-            timeout_seconds: 300,
-            auto_create_metadata: true,
-            s3_key_prefix: Some("test".to_string()),
-        }
+        UploadConfig::new(
+            create_test_credentials(),
+            "test-bucket".to_string(),
+            UploadTier::Premium
+        )
     }
 
     fn create_test_s3_key_config() -> S3KeyConfig {

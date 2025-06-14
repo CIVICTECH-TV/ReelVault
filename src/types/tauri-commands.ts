@@ -246,6 +246,15 @@ export interface UploadConfig {
   timeout_seconds: number;
   auto_create_metadata: boolean;
   s3_key_prefix?: string;
+  
+  // 🎯 統一システム用の制限パラメータ
+  max_concurrent_parts: number;        // チャンクレベル並列度（無料版: 1, プレミアム版: 4-8）
+  adaptive_chunk_size: boolean;        // 動的チャンクサイズ（無料版: false, プレミアム版: true）
+  min_chunk_size_mb: number;          // 最小チャンクサイズ（無料版: 5MB固定）
+  max_chunk_size_mb: number;          // 最大チャンクサイズ（無料版: 5MB固定）
+  bandwidth_limit_mbps?: number;       // 帯域制限（無料版: なし, プレミアム版: 設定可能）
+  enable_resume: boolean;              // 中断・再開機能（無料版: false, プレミアム版: true）
+  tier: 'Free' | 'Premium';           // 機能ティア
 }
 
 export interface UploadStatistics {
