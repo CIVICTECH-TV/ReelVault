@@ -1,10 +1,10 @@
 [package]
-name = "app"
+name = "reel_vault"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
-license = ""
-repository = ""
+description = "映像制作者向け長期アーカイブストレージ補助ツール"
+authors = ["kzkski <kzkski@users.noreply.github.com>"]
+license = "MIT"
+repository = "https://github.com/CIVICTECH-TV/ReelVault"
 edition = "2021"
 rust-version = "1.77.2"
 

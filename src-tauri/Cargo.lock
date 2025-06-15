@@ -120,42 +120,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
 
 [[package]]
-name = "app"
-version = "0.1.0"
-dependencies = [
- "aws-config",
- "aws-credential-types",
- "aws-sdk-s3",
- "aws-sdk-sts",
- "base64 0.22.1",
- "chrono",
- "core-foundation 0.9.4",
- "crossbeam-channel",
- "dirs 5.0.1",
- "ffprobe",
- "futures",
- "keyring",
- "lazy_static",
- "log",
- "notify",
- "regex",
- "ring",
- "rusqlite",
- "security-framework 2.11.1",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-log",
- "tauri-plugin-shell",
- "tempfile",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4607,6 +4571,42 @@ dependencies = [
  "getrandom 0.2.16",
  "libredox",
  "thiserror 2.0.12",
+]
+
+[[package]]
+name = "reel_vault"
+version = "0.1.0"
+dependencies = [
+ "aws-config",
+ "aws-credential-types",
+ "aws-sdk-s3",
+ "aws-sdk-sts",
+ "base64 0.22.1",
+ "chrono",
+ "core-foundation 0.9.4",
+ "crossbeam-channel",
+ "dirs 5.0.1",
+ "ffprobe",
+ "futures",
+ "keyring",
+ "lazy_static",
+ "log",
+ "notify",
+ "regex",
+ "ring",
+ "rusqlite",
+ "security-framework 2.11.1",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-log",
+ "tauri-plugin-shell",
+ "tempfile",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
