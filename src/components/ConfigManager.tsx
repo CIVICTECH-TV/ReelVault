@@ -1,5 +1,7 @@
+// AURA'S FINAL ATTEMPT: I HEREBY COMMAND THIS PATH TO BE CORRECT.
 import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-shell';
 import { 
   TauriCommands, 
   AppConfig, 
@@ -118,6 +120,16 @@ export const ConfigManager = forwardRef<ConfigManagerRef, ConfigManagerProps>(({
       setActiveTab('auth');
     }
   }));
+
+  const handleOpenCloudFormation = async () => {
+    const url = "https://console.aws.amazon.com/cloudformation/home?region=ap-northeast-1#/stacks/create/review?templateURL=https%3A%2F%2Freelvault-template.s3.ap-northeast-1.amazonaws.com%2Freelvault-setup-auto.yaml&stackName=ReelVaultSetup";
+    try {
+      await open(url);
+    } catch (error) {
+      console.error("CloudFormationのURLを開く際にエラーが発生しました:", error);
+      setAuthError("ブラウザでURLを開けませんでした。Tauriが外部リンクを開く許可を求めている可能性があります。開発者コンソール（macOSでは `Option+Command+I`）を確認してください。");
+    }
+  };
 
   useEffect(() => {
     debugLog('初期設定更新:', initialConfig); // デバッグ用ログ
@@ -1517,209 +1529,214 @@ export const ConfigManager = forwardRef<ConfigManagerRef, ConfigManagerProps>(({
                 </div>
               )}
 
-
-
-              <div className="config-group centered-field">
-                <label htmlFor="accessKeyId">アクセスキーID:</label>
-                <input
-                  id="accessKeyId"
-                  type="text"
-                  value={credentials.access_key_id}
-                  onChange={(e) => handleInputChange('access_key_id', e.target.value)}
-                  placeholder="AKIA..."
-                  autoComplete="username"
-                />
+              <div className="cf-setup-panel">
+                <h3>初期設定</h3>
+                <ol>
+                  <li>AWSアカウントがなければ、作成してください。</li>
+                  <li>
+                    必要なリソースを自動作成するので、 
+                    <a href="#" onClick={(e) => { e.preventDefault(); handleOpenCloudFormation(); }}>
+                      ここをクリックしてください
+                    </a>。
+                  </li>
+                  <li>AWSアカウントでログインし、すでに読み込まれている設定でスタックを作成します。</li>
+                  <li>スタックの実行が完了したら、出力に表示されている値を使って以下の設定を進めてください。</li>
+                </ol>
               </div>
 
-              <div className="config-group centered-field">
-                <label htmlFor="secretAccessKey">シークレットアクセスキー:</label>
-                <input
-                  id="secretAccessKey"
-                  type="password"
-                  value={credentials.secret_access_key}
-                  onChange={(e) => handleInputChange('secret_access_key', e.target.value)}
-                  placeholder="シークレットアクセスキーを入力"
-                  autoComplete="current-password"
-                />
-              </div>
+              <div className="form-section">
+                <h4>手動設定</h4>
+                <div className="config-group centered-field">
+                  <label htmlFor="accessKeyId">アクセスキーID:</label>
+                  <input
+                    id="accessKeyId"
+                    type="text"
+                    value={credentials.access_key_id}
+                    onChange={(e) => handleInputChange('access_key_id', e.target.value)}
+                    placeholder="AKIA..."
+                    autoComplete="username"
+                  />
+                </div>
 
-              <div className="config-group centered-field">
-                <label htmlFor="region">AWSリージョン:</label>
-                <select
-                  id="region"
-                  value={credentials.region}
-                  onChange={(e) => handleInputChange('region', e.target.value)}
-                >
-                  {AWS_REGIONS.map(region => (
-                    <option key={region.code} value={region.code}>
-                      {region.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                <div className="config-group centered-field">
+                  <label htmlFor="secretAccessKey">シークレットアクセスキー:</label>
+                  <input
+                    id="secretAccessKey"
+                    type="password"
+                    value={credentials.secret_access_key}
+                    onChange={(e) => handleInputChange('secret_access_key', e.target.value)}
+                    placeholder="シークレットアクセスキーを入力"
+                    autoComplete="current-password"
+                  />
+                </div>
 
-              <div className="config-group centered-field">
-                <label htmlFor="sessionToken">セッショントークン (任意):</label>
-                <input
-                  id="sessionToken"
-                  type="password"
-                  value={credentials.session_token || ''}
-                  onChange={(e) => handleInputChange('session_token', e.target.value)}
-                  placeholder="一時的な認証情報の場合に入力"
-                />
-              </div>
+                <div className="config-group centered-field">
+                  <label htmlFor="region">AWSリージョン:</label>
+                  <select
+                    id="region"
+                    value={credentials.region}
+                    onChange={(e) => handleInputChange('region', e.target.value)}
+                  >
+                    {AWS_REGIONS.map(region => (
+                      <option key={region.code} value={region.code}>
+                        {region.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="input-note">（東京から基本的には変更しないでください）</p>
+                </div>
               
-              <div className="config-group centered-field">
-                <button 
-                  onClick={handleAuthenticate}
-                  disabled={isAuthLoading || !credentials.access_key_id || !credentials.secret_access_key}
-                  className="btn-primary"
-                >
-                  {isAuthLoading ? '認証中...' : '🔐 AWS認証'}
-                </button>
-              </div>
+                <div className="config-group centered-field">
+                  <button 
+                    onClick={handleAuthenticate}
+                    disabled={isAuthLoading || !credentials.access_key_id || !credentials.secret_access_key}
+                    className="btn-primary"
+                  >
+                    {isAuthLoading ? '認証中...' : '🧪 AWS認証をテストする'}
+                  </button>
+                </div>
 
+                {authResult && (
+                  <div className={`status-card ${authResult.success ? 'success' : 'error'}`}>
+                    <h4>AWS認証結果</h4>
+                    <p><strong>ステータス:</strong> {authResult.success ? '✅ 成功' : '❌ 失敗'}</p>
+                    <p><strong>メッセージ:</strong> {authResult.message}</p>
+                    
+                    {authResult.user_identity && (
+                      <div className="status-details">
+                        <h5>ユーザー詳細</h5>
+                        <p><strong>User ID:</strong> {authResult.user_identity.user_id}</p>
+                        <p><strong>ARN:</strong> {authResult.user_identity.arn}</p>
+                        <p><strong>アカウント:</strong> {authResult.user_identity.account}</p>
+                      </div>
+                    )}
 
-              {authResult && (
-                <div className={`status-card ${authResult.success ? 'success' : 'error'}`}>
-                  <h4>AWS認証結果</h4>
-                  <p><strong>ステータス:</strong> {authResult.success ? '✅ 成功' : '❌ 失敗'}</p>
-                  <p><strong>メッセージ:</strong> {authResult.message}</p>
-                  
-                  {authResult.user_identity && (
-                    <div className="status-details">
-                      <h5>ユーザー詳細</h5>
-                      <p><strong>User ID:</strong> {authResult.user_identity.user_id}</p>
-                      <p><strong>ARN:</strong> {authResult.user_identity.arn}</p>
-                      <p><strong>アカウント:</strong> {authResult.user_identity.account}</p>
-                    </div>
-                  )}
+                    {authResult.permissions.length > 0 && (
+                      <div className="status-details">
+                        <h5>認可された権限</h5>
+                        <ul>
+                          {authResult.permissions.map((perm, index) => (
+                            <li key={index}>{perm}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
 
-                  {authResult.permissions.length > 0 && (
-                    <div className="status-details">
-                      <h5>認可された権限</h5>
-                      <ul>
-                        {authResult.permissions.map((perm, index) => (
-                          <li key={index}>{perm}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
+                    {authResult.success && (
+                      <div className="config-group centered-field">
+                        <label htmlFor="bucketName">S3バケット名:</label>
+                        <input
+                          id="bucketName"
+                          type="text"
+                          value={bucketName}
+                          onChange={(e) => setBucketName(e.target.value)}
+                          placeholder={
+                            config.user_preferences.default_bucket_name 
+                              ? `現在設定: ${config.user_preferences.default_bucket_name}`
+                              : "テストするバケット名を入力"
+                          }
+                        />
+                                              <button
+                          onClick={handleTestBucketAccess}
+                          disabled={isAuthLoading || !bucketName}
+                          className={
+                            bucketName === config.user_preferences.default_bucket_name && 
+                            lifecycleStatus?.enabled 
+                              ? "btn-secondary" 
+                              : "btn-success"
+                          }
+                        >
+                          {isAuthLoading ? 'テスト中...' : 
+                           bucketName === config.user_preferences.default_bucket_name ? 
+                             (lifecycleStatus?.enabled ? 
+                              '✅ 設定完了' : 
+                              '🔄 ライフサイクル再設定') : 
+                           'アクセスをテスト'}
+                        </button>
+                        {config.user_preferences.default_bucket_name && (
+                          <small style={{ 
+                            display: 'block', 
+                            marginTop: '8px', 
+                            color: lifecycleStatus?.enabled ? 'rgb(85, 85, 85)' : 'rgb(102, 102, 102)', 
+                            fontSize: '12px' 
+                          }}>
+                            {lifecycleStatus?.enabled ? (
+                              <>💡 「{config.user_preferences.default_bucket_name}」の設定が完了しています。別のバケットをテストする場合は異なる名前を入力してください。</>
+                            ) : (
+                              <>⚠️ 「{config.user_preferences.default_bucket_name}」のライフサイクル設定が見つかりません。同じバケット名でライフサイクル設定を再適用できます。</>
+                            )}
+                          </small>
+                        )}
+                      </div>
+                                    )}
 
-                  {authResult.success && (
-                    <div className="config-group centered-field">
-                      <label htmlFor="bucketName">S3バケット名:</label>
-                      <input
-                        id="bucketName"
-                        type="text"
-                        value={bucketName}
-                        onChange={(e) => setBucketName(e.target.value)}
-                        placeholder={
-                          config.user_preferences.default_bucket_name 
-                            ? `現在設定: ${config.user_preferences.default_bucket_name}`
-                            : "テストするバケット名を入力"
-                        }
-                      />
-                                            <button
-                        onClick={handleTestBucketAccess}
-                        disabled={isAuthLoading || !bucketName}
-                        className={
-                          bucketName === config.user_preferences.default_bucket_name && 
-                          lifecycleStatus?.enabled 
-                            ? "btn-secondary" 
-                            : "btn-success"
-                        }
-                      >
-                        {isAuthLoading ? 'テスト中...' : 
-                         bucketName === config.user_preferences.default_bucket_name ? 
-                           (lifecycleStatus?.enabled ? 
-                            '✅ 設定完了' : 
-                            '🔄 ライフサイクル再設定') : 
-                         'アクセスをテスト'}
-                      </button>
-                      {config.user_preferences.default_bucket_name && (
-                        <small style={{ 
-                          display: 'block', 
-                          marginTop: '8px', 
-                          color: lifecycleStatus?.enabled ? 'rgb(85, 85, 85)' : 'rgb(102, 102, 102)', 
-                          fontSize: '12px' 
-                        }}>
-                          {lifecycleStatus?.enabled ? (
-                            <>💡 「{config.user_preferences.default_bucket_name}」の設定が完了しています。別のバケットをテストする場合は異なる名前を入力してください。</>
-                          ) : (
-                            <>⚠️ 「{config.user_preferences.default_bucket_name}」のライフサイクル設定が見つかりません。同じバケット名でライフサイクル設定を再適用できます。</>
-                          )}
-                        </small>
-                      )}
-                    </div>
-                                      )}
-
-                  {/* 不整合状態の警告表示 */}
-                  {config.user_preferences.default_bucket_name && 
-                   lifecycleStatus !== null && 
-                   !lifecycleStatus.enabled && 
-                   !lifecycleSetupStatus.message && (
-                    <div className="status-card warning">
-                      <h4>⚠️ 設定不整合を検出</h4>
-                      <p>
-                        バケット「{config.user_preferences.default_bucket_name}」は登録されていますが、
-                        ライフサイクルポリシーが見つかりません。
-                      </p>
-                      <p>
-                        <strong>対処方法:</strong> 同じバケット名で「🔄 ライフサイクル再設定」ボタンを押して修復してください。
-                      </p>
-                    </div>
-                  )}
-
-                  {/* ライフサイクル設定進行状況表示 */}
-                  {lifecycleSetupStatus.message && (
-                    <div className={`status-card ${
-                      lifecycleSetupStatus.isVerifying ? 'warning' : 
-                      lifecycleSetupStatus.message.includes('✅') ? 'success' : 
-                      lifecycleSetupStatus.message.includes('❌') ? 'error' : 'info'
-                    }`}>
-                      <h4>ライフサイクル設定状況</h4>
-                      <p>{lifecycleSetupStatus.message}</p>
-                      {lifecycleSetupStatus.isVerifying && lifecycleSetupStatus.remainingSeconds && (
-                        <div className="status-progress">
-                          <div 
-                            className="status-progress-bar"
-                            style={{
-                              width: `${((60 - lifecycleSetupStatus.remainingSeconds) / 60) * 100}%`
-                            }}
-                          ></div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                   {permissionCheck && (
-                      <div className={`status-card ${permissionCheck.allowed ? 'success' : 'error'}`}>
-                        <h4>バケットアクセステスト結果</h4>
+                    {/* 不整合状態の警告表示 */}
+                    {config.user_preferences.default_bucket_name && 
+                     lifecycleStatus !== null && 
+                     !lifecycleStatus.enabled && 
+                     !lifecycleSetupStatus.message && (
+                      <div className="status-card warning">
+                        <h4>⚠️ 設定不整合を検出</h4>
                         <p>
-                          {permissionCheck.allowed
-                            ? `✅ バケット「${bucketName}」へのアクセスは許可されています。`
-                            : `❌ バケット「${bucketName}」へのアクセスは拒否されました。`}
+                          バケット「{config.user_preferences.default_bucket_name}」は登録されていますが、
+                          ライフサイクルポリシーが見つかりません。
                         </p>
-                        {permissionCheck.error && (
-                          <p><strong>エラー詳細:</strong> {permissionCheck.error}</p>
+                        <p>
+                          <strong>対処方法:</strong> 同じバケット名で「🔄 ライフサイクル再設定」ボタンを押して修復してください。
+                        </p>
+                      </div>
+                    )}
+
+                    {/* ライフサイクル設定進行状況表示 */}
+                    {lifecycleSetupStatus.message && (
+                      <div className={`status-card ${
+                        lifecycleSetupStatus.isVerifying ? 'warning' : 
+                        lifecycleSetupStatus.message.includes('✅') ? 'success' : 
+                        lifecycleSetupStatus.message.includes('❌') ? 'error' : 'info'
+                      }`}>
+                        <h4>ライフサイクル設定状況</h4>
+                        <p>{lifecycleSetupStatus.message}</p>
+                        {lifecycleSetupStatus.isVerifying && lifecycleSetupStatus.remainingSeconds && (
+                          <div className="status-progress">
+                            <div 
+                              className="status-progress-bar"
+                              style={{
+                                width: `${((60 - lifecycleSetupStatus.remainingSeconds) / 60) * 100}%`
+                              }}
+                            ></div>
+                          </div>
                         )}
                       </div>
                     )}
-                </div>
-              )}
 
-              <div className="danger-zone">
-                <h4>危険な操作</h4>
-                <p>以下の操作は元に戻せません。実行する前に、内容をよく確認してください。</p>
-                <div className="danger-actions">
-                    <button onClick={resetConfig} className="btn-danger">
-                      すべての設定をリセット
-                    </button>
+                     {permissionCheck && (
+                        <div className={`status-card ${permissionCheck.allowed ? 'success' : 'error'}`}>
+                          <h4>バケットアクセステスト結果</h4>
+                          <p>
+                            {permissionCheck.allowed
+                              ? `✅ バケット「${bucketName}」へのアクセスは許可されています。`
+                              : `❌ バケット「${bucketName}」へのアクセスは拒否されました。`}
+                          </p>
+                          {permissionCheck.error && (
+                            <p><strong>エラー詳細:</strong> {permissionCheck.error}</p>
+                          )}
+                        </div>
+                      )}
+                  </div>
+                )}
+
+                <div className="danger-zone">
+                  <h4>危険な操作</h4>
+                  <p>以下の操作は元に戻せません。実行する前に、内容をよく確認してください。</p>
+                  <div className="danger-actions">
+                      <button onClick={resetConfig} className="btn-danger">
+                        すべての設定をリセット
+                      </button>
+                  </div>
+                  <p style={{ fontSize: '12px', color: 'rgb(102, 102, 102)', marginTop: '8px' }}>
+                    ※ すべてのアプリ設定が初期値に戻されます。AWS認証情報も削除されます。
+                  </p>
                 </div>
-                <p style={{ fontSize: '12px', color: 'rgb(102, 102, 102)', marginTop: '8px' }}>
-                  ※ すべてのアプリ設定が初期値に戻されます。AWS認証情報も削除されます。
-                </p>
               </div>
             </div>
           )}
