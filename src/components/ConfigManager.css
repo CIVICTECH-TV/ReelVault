@@ -1264,3 +1264,141 @@
 .config-manager .config-section .upload-manager .debug-info:last-child {
   margin-bottom: 0 !important;
 }
+
+.settings-panel h3 {
+  color: var(--text-primary);
+  border-bottom: 2px solid var(--accent-primary);
+  padding-bottom: 10px;
+  margin-bottom: 20px;
+}
+
+.cf-setup-panel {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 30px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.cf-setup-panel h3 {
+  margin-top: 0;
+  color: var(--accent-secondary);
+  border-bottom-color: var(--accent-secondary);
+}
+
+.cf-setup-panel ol {
+  padding-left: 20px;
+  line-height: 1.8;
+  color: #333;
+}
+
+.cf-setup-panel li {
+  margin-bottom: 10px;
+}
+
+.cf-setup-panel a {
+  font-weight: bold;
+  color: var(--accent-primary);
+  text-decoration: none;
+  transition: color 0.3s ease;
+}
+
+.cf-setup-panel a:hover {
+  color: #66bb6a;
+  text-decoration: underline;
+}
+
+.form-section {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-secondary);
+}
+
+.form-section h4 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  color: #555;
+  font-size: 1.1em;
+}
+
+.input-note {
+  font-size: 0.85em;
+  color: #777;
+  margin-top: 5px;
+  margin-left: 2px;
+}
+
+.tab-content {
+  padding: 20px;
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  background-color: var(--bg-primary);
+}
+
+.restore-status-indicator.restoring {
+  background-color: #ff9800; /* Orange */
+}
+
+/* --- CloudFormation Setup Panel --- */
+.cf-setup-panel {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 30px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.cf-setup-panel h3 {
+  margin-top: 0;
+  color: var(--accent-secondary);
+  border-bottom: 2px solid var(--accent-secondary);
+  padding-bottom: 10px;
+  margin-bottom: 20px;
+}
+
+.cf-setup-panel ol {
+  padding-left: 20px;
+  line-height: 1.8;
+  color: #333;
+}
+
+.cf-setup-panel li {
+  margin-bottom: 10px;
+}
+
+.cf-setup-panel a {
+  font-weight: bold;
+  color: var(--accent-primary);
+  text-decoration: none;
+  transition: color 0.3s ease;
+}
+
+.cf-setup-panel a:hover {
+  color: #66bb6a;
+  text-decoration: underline;
+}
+
+.form-section {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-secondary);
+}
+
+.form-section h4 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  color: #555;
+  font-size: 1.1em;
+}
+
+/* Light Theme Overrides */
+html[data-theme='light'] .cf-setup-panel {
+  background-color: #f0f0f0;
+  border-color: #ddd;
+}
+
+html[data-theme='light'] .cf-setup-panel ol {
+  color: #333;
+}
