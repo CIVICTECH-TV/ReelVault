@@ -1,619 +1,132 @@
-# Tauri Command API仕様書
-
-ReelVaultアプリケーションのTauri Command API群の仕様書です。
-
-## 📋 概要
-
-このAPIは、React（TypeScript）フロントエンドとRustバックエンド間の通信を提供します。
-5つの主要カテゴリに分類された **28個のAPI** を実装済みです：
-
-1. **ファイル操作API** (7個) - ローカルファイルシステムの操作
-2. **AWS操作API** (4個) - AWS S3との連携機能
-3. **AWS認証API** (5個) - AWS認証・macOS Keychain統合
-4. **設定管理API** (9個) - アプリケーション設定の管理・JSON永続化
-5. **状態管理API** (3個) - リアルタイムアプリケーション状態の管理
-
-## 🆕 Epic1新機能
-
-- **AWS実認証**: AWS STS `get_caller_identity`による確実な接続確認
-- **macOS Keychain**: keyringライブラリでセキュアな認証情報保存
-- **Ring暗号化**: 暗号化による認証情報保護
-- **設定永続化**: JSON形式での設定自動保存・バックアップ機能
-- **包括的検証**: 28項目の設定バリデーション
-
-## 🗂️ ファイル操作API
-
-### `list_files`
-ディレクトリ内のファイル一覧を取得します。
-
-**パラメータ:**
-```typescript
-{
-  directory: string  // ディレクトリパス
-}
-```
-
-**戻り値:**
-```typescript
-FileInfo[] // ファイル情報の配列
-```
-
-**使用例:**
-```typescript
-const files = await TauriCommands.listFiles("/Users/username/Videos");
-```
-
-### `get_file_info`
-特定ファイルの詳細情報を取得します。
-
-**パラメータ:**
-```typescript
-{
-  filePath: string  // ファイルパス
-}
-```
-
-**戻り値:**
-```typescript
-FileInfo  // ファイル詳細情報
-```
-
-### `watch_directory`
-ディレクトリ監視を開始します（基本実装版）。
-
-**パラメータ:**
-```typescript
-{
-  config: WatchConfig  // 監視設定
-}
-```
-
-**戻り値:**
-```typescript
-string  // 設定確認メッセージ
-```
-
-## ☁️ AWS操作API
-
-### `test_aws_connection`
-AWS接続をテストします。
-
-**パラメータ:**
-```typescript
-{
-  config: AwsConfig  // AWS認証設定
-}
-```
-
-**戻り値:**
-```typescript
-ConnectionTestResult  // 接続テスト結果
-```
-
-### `upload_file`
-ファイルをS3にアップロードします（モック実装）。
-
-**パラメータ:**
-```typescript
-{
-  filePath: string,    // ローカルファイルパス
-  s3Key: string,       // S3キー
-  config: AwsConfig    // AWS設定
-}
-```
-
-**戻り値:**
-```typescript
-string  // アップロード結果メッセージ
-```
-
-### `list_s3_objects`
-S3バケット内のオブジェクト一覧を取得します（モック実装）。
-
-**パラメータ:**
-```typescript
-{
-  config: AwsConfig,     // AWS設定
-  prefix?: string        // オプション：オブジェクトキーの接頭辞
-}
-```
-
-**戻り値:**
-```typescript
-S3Object[]  // S3オブジェクトの配列
-```
-
-### `restore_file`
-Deep Archiveからファイルを復元します（モック実装）。
-
-**パラメータ:**
-```typescript
-{
-  s3Key: string,        // S3キー
-  config: AwsConfig,    // AWS設定
-  tier: string          // 復元ティア: "Standard" | "Expedited" | "Bulk"
-}
-```
-
-**戻り値:**
-```typescript
-RestoreInfo  // 復元情報
-```
-
-## 🔐 AWS認証API
-
-### `authenticate_aws`
-AWS STS経由で実際の認証を行います。
-
-**パラメータ:**
-```typescript
-{
-  credentials: AwsCredentials  // AWS認証情報
-}
-```
-
-**戻り値:**
-```typescript
-AwsAuthResult  // 認証結果とユーザー情報
-```
-
-**使用例:**
-```typescript
-const result = await TauriCommands.authenticateAws({
-  access_key_id: "AKIA...",
-  secret_access_key: "...",
-  region: "ap-northeast-1", // Default to Tokyo region
-  session_token: null
-});
-```
-
-### `test_s3_bucket_access`
-S3バケットへのアクセス権限をテストします。
-
-**パラメータ:**
-```typescript
-{
-  credentials: AwsCredentials,  // AWS認証情報
-  bucket_name: string          // テスト対象バケット名
-}
-```
-
-**戻り値:**
-```typescript
-AwsAuthResult  // バケットアクセステスト結果
-```
-
-### `save_aws_credentials_secure`
-AWS認証情報をmacOS Keychainにセキュアに保存します。
-
-**パラメータ:**
-```typescript
-{
-  profile_name: string,        // プロファイル名
-  credentials: AwsCredentials  // 保存する認証情報
-}
-```
-
-**戻り値:**
-```typescript
-string  // 保存結果メッセージ
-```
-
-### `load_aws_credentials_secure`
-保存されたAWS認証情報をKeychainから読み込みます。
-
-**パラメータ:**
-```typescript
-{
-  profile_name: string  // プロファイル名
-}
-```
-
-**戻り値:**
-```typescript
-AwsCredentials  // 読み込まれた認証情報
-```
-
-### `delete_aws_credentials_secure`
-保存されたAWS認証情報をKeychainから削除します。
-
-**パラメータ:**
-```typescript
-{
-  profile_name: string  // プロファイル名
-}
-```
-
-**戻り値:**
-```typescript
-string  // 削除結果メッセージ
-```
-
-## ⚙️ 設定管理API
-
-### `get_config`
-現在のアプリケーション設定を取得します（存在しない場合はデフォルト生成）。
-
-**パラメータ:** なし
-
-**戻り値:**
-```typescript
-AppConfig  // アプリケーション設定
-```
-
-### `set_config`
-アプリケーション設定を保存します（自動バックアップ・検証付き）。
-
-**パラメータ:**
-```typescript
-{
-  config: AppConfig  // 新しい設定
-}
-```
-
-**戻り値:**
-```typescript
-string  // 保存結果メッセージ
-```
-
-### `update_config`
-設定の部分更新を行います（HashMap型で柔軟更新）。
-
-**パラメータ:**
-```typescript
-{
-  updates: Record<string, any>  // 更新内容（キー・値ペア）
-}
-```
-
-**戻り値:**
-```typescript
-string  // 更新結果メッセージ
-```
-
-### `reset_config`
-設定をデフォルトにリセットします。
-
-**パラメータ:** なし
-
-**戻り値:**
-```typescript
-string  // リセット結果メッセージ
-```
-
-### `validate_config_file`
-設定ファイルの包括的検証を行います（28項目チェック）。
-
-**パラメータ:** なし
-
-**戻り値:**
-```typescript
-ConfigValidationResult  // 検証結果・エラー・警告
-```
-
-### `backup_config`
-現在の設定のタイムスタンプ付きバックアップを作成します。
-
-**パラメータ:** なし
-
-**戻り値:**
-```typescript
-string  // バックアップファイルパス
-```
-
-### `restore_config`
-指定されたバックアップファイルから設定を復元します。
-
-**パラメータ:**
-```typescript
-{
-  backup_path: string  // バックアップファイルパス
-}
-```
-
-**戻り値:**
-```typescript
-string  // 復元結果メッセージ
-```
-
-### `add_recent_file`
-最近使用したファイルを履歴に追加します（最大10件管理）。
-
-**パラメータ:**
-```typescript
-{
-  file_path: string  // ファイルパス
-}
-```
-
-**戻り値:**
-```typescript
-string  // 追加結果メッセージ
-```
-
-### `clear_recent_files`
-最近使用したファイルの履歴をクリアします。
-
-**パラメータ:** なし
-
-**戻り値:**
-```typescript
-string  // クリア結果メッセージ
-```
-
-## 📊 状態管理API
-
-### `get_app_state`
-現在のアプリケーション状態を取得します。
-
-**パラメータ:** なし
-
-**戻り値:**
-```typescript
-AppState  // アプリケーション状態
-```
-
-### `set_app_state`
-アプリケーション状態を更新します。
-
-**パラメータ:**
-```typescript
-{
-  newState: AppState  // 新しい状態
-}
-```
-
-**戻り値:**
-```typescript
-string  // 更新結果メッセージ
-```
-
-### `update_app_state`
-状態の部分更新を行います。
-
-**パラメータ:**
-```typescript
-{
-  update: StateUpdate  // 更新内容
-}
-```
-
-**戻り値:**
-```typescript
-string  // 更新結果メッセージ
-```
-
-### `add_to_upload_queue`
-アップロードキューにファイルを追加します。
-
-**パラメータ:**
-```typescript
-{
-  filePath: string  // ファイルパス
-}
-```
-
-**戻り値:**
-```typescript
-string  // 追加結果メッセージ（アイテムIDを含む）
-```
-
-### `remove_from_upload_queue`
-アップロードキューからアイテムを削除します。
-
-**パラメータ:**
-```typescript
-{
-  itemId: string  // アイテムID
-}
-```
-
-**戻り値:**
-```typescript
-string  // 削除結果メッセージ
-```
-
-### `update_system_stats`
-システム統計を更新します。
-
-**パラメータ:** なし
-
-**戻り値:**
-```typescript
-SystemStatus  // 更新されたシステム状態
-```
-
-### `reset_app_state`
-アプリケーション状態をリセットします。
-
-**パラメータ:** なし
-
-**戻り値:**
-```typescript
-string  // リセット結果メッセージ
-```
-
-## 📝 型定義
-
-### FileInfo
-```typescript
-interface FileInfo {
-  name: string;           // ファイル名
-  path: string;           // フルパス
-  size: number;           // ファイルサイズ（バイト）
-  modified: string;       // 最終更新日時
-  is_directory: boolean;  // ディレクトリかどうか
-  extension?: string;     // ファイル拡張子
-}
-```
-
-### WatchConfig
-```typescript
-interface WatchConfig {
-  path: string;              // 監視するディレクトリパス
-  recursive: boolean;        // 再帰的監視
-  file_patterns: string[];   // ファイルパターン（例：["*.mp4", "*.mov"]）
-}
-```
-
-### AwsConfig
-```typescript
-interface AwsConfig {
-  access_key_id: string;     // AWSアクセスキーID
-  secret_access_key: string; // AWSシークレットアクセスキー
-  region: string;            // AWSリージョン
-  bucket_name: string;       // S3バケット名
-}
-```
-
-### AwsCredentials
-```typescript
-interface AwsCredentials {
-  access_key_id: string;      // AWSアクセスキーID
-  secret_access_key: string;  // AWSシークレットアクセスキー
-  region: string;             // AWSリージョン
-  session_token: string | null; // セッショントークン（STSの場合）
-}
-```
-
-### AwsAuthResult
-```typescript
-interface AwsAuthResult {
-  success: boolean;             // 認証成功フラグ
-  message: string;              // 結果メッセージ
-  user_identity?: AwsUserIdentity; // ユーザー情報（成功時のみ）
-  permissions?: PermissionCheck[]; // 権限チェック結果
-}
-```
-
-### AwsUserIdentity
-```typescript
-interface AwsUserIdentity {
-  user_id: string;    // ユーザーID
-  arn: string;        // ARN
-  account: string;    // アカウントID
-}
-```
-
-### PermissionCheck
-```typescript
-interface PermissionCheck {
-  service: string;    // AWSサービス名
-  action: string;     // アクション名
-  resource: string;   // リソース名
-  allowed: boolean;   // 許可されているか
-}
-```
-
-### AppConfig
-```typescript
-interface AppConfig {
-  version: string;                    // 設定ファイルバージョン
-  app_settings: AppSettings;          // アプリケーション設定
-  user_preferences: UserPreferences;  // ユーザー設定
-  aws_settings: AwsSettings;          // AWS設定
-}
-```
-
-### AppSettings
-```typescript
-interface AppSettings {
-  auto_save: boolean;         // 自動保存
-  backup_enabled: boolean;    // バックアップ有効化
-  log_level: string;          // ログレベル
-  theme: string;              // テーマ
-  language: string;           // 言語
-}
-```
-
-### UserPreferences
-```typescript
-interface UserPreferences {
-  default_bucket_name: string;    // デフォルトS3バケット
-  default_storage_class: string;  // デフォルトストレージクラス
-  compression_enabled: boolean;   // 圧縮有効化
-  notification_enabled: boolean;  // 通知有効化
-  recent_files: string[];         // 最近使用ファイル（最大10件）
-}
-```
-
-### AwsSettings
-```typescript
-interface AwsSettings {
-  default_region: string;    // デフォルトリージョン
-  timeout_seconds: number;   // タイムアウト秒数
-  max_retries: number;       // 最大リトライ回数
-  profile_name: string;      // プロファイル名
-}
-```
-
-### ConfigValidationResult
-```typescript
-interface ConfigValidationResult {
-  valid: boolean;       // 検証結果
-  errors: string[];     // エラーリスト
-  warnings: string[];   // 警告リスト
-}
-```
-
-### AppState
-```typescript
-interface AppState {
-  is_watching: boolean;                    // 監視中かどうか
-  upload_queue: UploadItem[];             // アップロードキュー
-  current_uploads: UploadProgressInfo[];  // 現在のアップロード進捗
-  statistics: AppStatistics;              // 統計情報
-  last_error?: string;                    // 最後のエラー
-  system_status: SystemStatus;            // システム状態
-}
-```
-
-## 🛠️ エラーハンドリング
-
-すべてのAPIは`Result<T, String>`形式で結果を返します：
-
-- **成功時**: `Ok(T)` - 期待される戻り値
-- **エラー時**: `Err(String)` - エラーメッセージ
-
-TypeScript側では、Promiseの`catch`でエラーを捕捉できます：
-
-```typescript
-try {
-  const files = await TauriCommands.listFiles("/invalid/path");
-} catch (error) {
-  console.error("API Error:", error);
-}
-```
-
-## 🔐 セキュリティ考慮事項
-
-1. **認証情報の保護**: AWS認証情報は実装では暗号化して保存する予定
-2. **ファイルアクセス制限**: ユーザーのホームディレクトリ外へのアクセス制限を検討
-3. **入力検証**: すべての入力パラメータは適切に検証される
-
-## 📈 将来の拡張予定
-
-1. **実際のAWS SDK統合** - 現在のモック実装を実際のAWS操作に置き換え
-2. **ファイル監視の実装** - notify crateを使った実際のファイル監視機能
-3. **アップロード進捗の実装** - リアルタイムアップロード進捗の追跡
-4. **暗号化機能** - 設定ファイルとAWS認証情報の暗号化
-
-## 🧪 テスト
-
-Reactアプリ内でAPIテスト機能が利用可能です：
-
-1. アプリケーションを起動: `cargo tauri dev`
-2. 各APIカテゴリのテストボタンをクリック
-3. テスト結果をリアルタイムで確認
-
-**テスト可能な機能:**
-- ファイル操作API（ファイル一覧取得、ファイル情報取得）
-- AWS操作API（接続テスト、モックS3操作）
-- 設定管理API（設定読み書き、部分更新）
-- 状態管理API（状態取得・更新、アップロードキュー操作）
+# ReelVault Tauri Command API v2.0
+
+このドキュメントは、ReelVaultアプリケーションのTauriコマンドAPIの仕様を定義します。
+APIは機能ごとに7つのモジュールに分類されています。
+
+## APIモジュール一覧
+
+1.  **[ファイル操作API (`file_operations`)](#1-ファイル操作api-file_operations)**
+2.  **[AWS操作API (`aws_operations`)](#2-aws操作api-aws_operations)**
+3.  **[AWS認証API (`aws_auth`)](#3-aws認証api-aws_auth)**
+4.  **[設定管理API (`config`)](#4-設定管理api-config)**
+5.  **[状態管理API (`state_management`)](#5-状態管理api-state_management)**
+6.  **[メタデータ管理API (`metadata`)](#6-メタデータ管理api-metadata)**
+7.  **[アップロードシステムAPI (`upload_system`)](#7-アップロードシステムapi-upload_system)**
+8.  **[ライフサイクル管理API (`lifecycle`)](#8-ライフサイクル管理api-lifecycle)**
 
 ---
 
-**更新日**: 2024-12-06  
-**バージョン**: 2.0 (Epic1完全実装版 - 28個API対応)  
-**実装完了**: AWS認証API (5個) + 設定管理API拡張 (9個) + 既存API (14個) 
+## 1. ファイル操作API (`file_operations`)
+
+| コマンド名                  | 説明                                               |
+| --------------------------- | -------------------------------------------------- |
+| `list_files`                | 指定されたディレクトリ内のファイル一覧を取得します。 |
+| `get_file_info`             | 指定されたファイルの情報を取得します。             |
+| `select_directory`          | ディレクトリ選択ダイアログを開きます。             |
+| `watch_directory`           | 指定されたディレクトリの監視を開始します。         |
+| `test_watch_system`         | ファイル監視システムのテストを実行します。         |
+| `get_sample_watch_configs`  | サンプルの監視設定を取得します。                   |
+
+---
+
+## 2. AWS操作API (`aws_operations`)
+
+| コマンド名                   | 説明                                                 |
+| ---------------------------- | ---------------------------------------------------- |
+| `test_aws_connection`        | AWSへの接続をテストします。                          |
+| `upload_file`                | ファイルをS3にアップロードします（現在はモック）。     |
+| `list_s3_objects`            | S3バケット内のオブジェクト一覧を取得します。         |
+| `restore_file`               | S3からファイルを復元します。                         |
+| `check_restore_status`       | ファイルの復元状況を確認します。                     |
+| `get_restore_notifications`  | 復元に関する通知を取得します。                       |
+| `download_s3_file`           | S3からファイルをダウンロードします。                 |
+| `download_restored_file`     | 復元されたファイルをダウンロードします。             |
+| `list_restore_jobs`          | 進行中の復元ジョブ一覧を取得します。                 |
+| `cancel_restore_job`         | 復元ジョブをキャンセルします。                       |
+| `clear_restore_history`      | 復元履歴をクリアします。                             |
+
+---
+
+## 3. AWS認証API (`aws_auth`)
+
+| コマンド名                      | 説明                                                         |
+| ------------------------------- | ------------------------------------------------------------ |
+| `authenticate_aws`              | AWS認証を実行し、ユーザーIDや権限を確認します。              |
+| `test_s3_bucket_access`         | S3バケットへのアクセスをテストし、ライフサイクルポリシーを自動設定します。 |
+| `save_aws_credentials_secure`   | AWS認証情報をセキュアに保存します（macOS Keychain/Windows Credential Manager）。 |
+| `load_aws_credentials_secure`   | 保存されたAWS認証情報をセキュアに読み込みます。              |
+
+---
+
+## 4. 設定管理API (`config`)
+
+| コマンド名                 | 説明                                   |
+| -------------------------- | -------------------------------------- |
+| `get_config`               | 現在のアプリケーション設定を取得します。 |
+| `set_config`               | アプリケーション設定を上書きします。     |
+| `update_config`            | アプリケーション設定を部分的に更新します。 |
+| `reset_config`             | 設定をデフォルト値にリセットします。     |
+| `validate_config_file`     | 設定ファイルの有効性を検証します。     |
+| `validate_config_data`     | 設定データの有効性を検証します。       |
+| `backup_config`            | 設定ファイルをバックアップします。     |
+| `export_config`            | 設定をファイルにエクスポートします。   |
+| `import_config`            | ファイルから設定をインポートします。   |
+| `restore_config`           | バックアップから設定を復元します。     |
+
+---
+
+## 5. 状態管理API (`state_management`)
+
+| コマンド名                | 説明                                         |
+| ------------------------- | -------------------------------------------- |
+| `get_app_state`           | 現在のアプリケーション状態を取得します。     |
+| `set_app_state`           | アプリケーション状態を上書きします。         |
+| `update_app_state`        | アプリケーション状態を部分的に更新します。   |
+| `add_to_upload_queue`     | アップロードキューに項目を追加します。       |
+| `update_system_stats`     | CPUやメモリなどのシステム統計を更新します。    |
+| `reset_app_state`         | アプリケーション状態を初期値にリセットします。 |
+
+---
+
+## 6. メタデータ管理API (`metadata`)
+
+| コマンド名                 | 説明                                         |
+| -------------------------- | -------------------------------------------- |
+| `initialize_metadata_db`   | メタデータ用データベースを初期化します。     |
+| `create_file_metadata`     | 新しいファイルメタデータを作成します。       |
+| `save_file_metadata`       | ファイルメタデータを保存します。             |
+| `search_file_metadata`     | ファイルメタデータを検索します。             |
+| `update_file_metadata`     | ファイルメタデータを更新します。             |
+| `delete_file_metadata`     | ファイルメタデータを削除します。             |
+| `get_all_tags`             | 全てのタグを取得します。                     |
+
+---
+
+## 7. アップロードシステムAPI (`upload_system`)
+
+| コマンド名                      | 説明                                           |
+| ------------------------------- | ---------------------------------------------- |
+| `initialize_upload_queue`       | アップロードキューを初期化します。             |
+| `open_file_dialog`              | ファイル選択ダイアログを開きます。             |
+| `add_files_to_upload_queue`     | 複数のファイルをアップロードキューに追加します。 |
+| `remove_upload_item`            | アップロードキューから項目を削除します。       |
+| `start_upload_processing`       | アップロード処理を開始します。                 |
+| `stop_upload_processing`        | アップロード処理を停止します。                 |
+| `get_upload_queue_status`       | アップロードキューの状態を取得します。         |
+| `get_upload_queue_items`        | アップロードキュー内の項目一覧を取得します。   |
+| `retry_upload_item`             | 失敗したアップロード項目を再試行します。       |
+| `clear_upload_queue`            | アップロードキューをクリアします。             |
+| `test_upload_config`            | アップロード設定をテストします。               |
+
+---
+
+## 8. ライフサイクル管理API (`lifecycle`)
+
+| コマンド名                     | 説明                                                               |
+| ------------------------------ | ------------------------------------------------------------------ |
+| `enable_reelvault_lifecycle`   | ReelVault推奨のS3ライフサイクルポリシーを有効化します。              |
+| `get_lifecycle_status`         | 現在のライフサイクル設定のステータスを取得します。                 |
+| `disable_lifecycle_policy`     | S3バケットのライフサイクルポリシーを無効化します。                 |
+| `list_lifecycle_rules`         | 現在のライフサイクルルール一覧を取得します。                       |
+| `validate_lifecycle_config`    | ライフサイクル設定の有効性を検証します。                           |
+| `check_upload_readiness`       | アップロードの前提条件（認証、バケット設定など）が整っているか確認します。 |
