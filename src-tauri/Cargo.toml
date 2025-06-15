@@ -1,7 +1,7 @@
 [package]
 name = "reel_vault"
 version = "0.1.0"
-description = "映像制作者向け長期アーカイブストレージ補助ツール"
+description = "映像制作者のためのアーカイブツール"
 authors = ["kzkski <kzkski@users.noreply.github.com>"]
 license = "MIT"
 repository = "https://github.com/CIVICTECH-TV/ReelVault"
