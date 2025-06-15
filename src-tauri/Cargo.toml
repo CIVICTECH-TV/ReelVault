@@ -26,6 +26,14 @@ tauri-plugin-log = "2.0.0-rc"
 tauri-plugin-shell = "2.0.0-rc"
 tauri-plugin-dialog = "2.0.0-rc"
 
+# ロギングとエラーハンドリング
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "chrono"] }
+tracing-appender = "0.2"
+tracing-log = "0.2"
+thiserror = "1.0"
+anyhow = "1.0"
+
 # 新規追加の依存関係
 dirs = "5.0"           # 設定ディレクトリパス取得用
 uuid = { version = "1.0", features = ["v4"] }  # UUID生成用

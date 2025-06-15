@@ -18,6 +18,12 @@ mod commands {
     pub mod lifecycle;
 }
 
+mod logger;
+mod error;
+
+// エイリアス
+pub type AppResult<T> = Result<T, error::AppError>;
+
 // コマンドをインポート
 use commands::file_operations::*;
 use commands::aws_operations::*;
@@ -157,18 +163,19 @@ pub fn run() {
         check_upload_readiness
     ])
     .setup(|app| {
-      if cfg!(debug_assertions) {
-        app.handle().plugin(
-          tauri_plugin_log::Builder::default()
-            .level(log::LevelFilter::Info)
-            .build(),
-        )?;
-      }
+        // ロガーを初期化
+        if let Err(e) = logger::init_logger(app.handle()) {
+            eprintln!("Failed to initialize logger: {}", e);
+        }
+        tracing::info!("Logger initialized, setting up system tray...");
+
+        // システムトレイを初期化
+        setup_system_tray(app)?;
+        
+        // `log` crate のログを `tracing` に転送
+        tracing_log::LogTracer::init().expect("Failed to set logger bridge");
       
-      // システムトレイを初期化
-      setup_system_tray(app)?;
-      
-      Ok(())
+        Ok(())
     })
     .on_window_event(|window, event| {
       match event {
