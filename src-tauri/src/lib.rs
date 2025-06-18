@@ -19,10 +19,6 @@ mod commands {
 }
 
 mod logger;
-mod error;
-
-// エイリアス
-pub type AppResult<T> = Result<T, error::AppError>;
 
 // コマンドをインポート
 use commands::file_operations::*;
