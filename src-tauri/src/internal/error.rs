@@ -6,7 +6,7 @@ use thiserror::Error;
 pub enum InternalError {
     /// AWS S3関連のエラー
     #[error("AWS S3 error: {0}")]
-    S3(#[from] aws_sdk_s3::Error),
+    S3(String),
 
     /// AWS STS関連のエラー
     #[error("AWS STS error: {0}")]
