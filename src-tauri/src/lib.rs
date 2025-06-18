@@ -171,9 +171,6 @@ pub fn run() {
 
         // システムトレイを初期化
         setup_system_tray(app)?;
-        
-        // `log` crate のログを `tracing` に転送
-        tracing_log::LogTracer::init().expect("Failed to set logger bridge");
       
         Ok(())
     })

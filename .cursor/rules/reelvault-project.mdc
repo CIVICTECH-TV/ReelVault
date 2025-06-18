@@ -142,6 +142,58 @@ gh api repos/{owner}/{repo}/issues/{number}/labels -f labels[]="label-name"
 - **配列追加**: `{"labels": ["label1", "label2"]}`
 - **エスケープ回避**: ファイルベース更新推奨
 
+## バージョン・リリース管理
+
+### バージョン管理方針 (`v0`段階)
+
+`v1.0.0`として最初の安定版をリリースするまでは、バージョンを **`v0.MINOR.PATCH`** の形式で管理します。
+
+- **`PATCH` (`v0.1.0` → `v0.1.1`)**:
+  - **対象**: バグ修正、ドキュメント更新など、後方互換性を壊さない**小さな修正**。
+  - ユーザーから見て機能的な変化はありません。
+
+- **`MINOR` (`v0.1.0` → `v0.2.0`)**:
+  - **対象**: 新機能の追加、既存機能の変更、APIの変更、依存関係の更新など、**何かしら新しいことが起こった**場合。
+  - `v0`段階では、互換性を壊す変更も`MINOR`を上げます。
+
+- **`v1.0.0`**:
+  - **対象**: 主要機能が一通り安定して動作する**最初の安定版（MVP）**が完成したと判断した時。
+
+### バージョン情報の連携
+
+アプリケーションのバージョン情報は **`src-tauri/Cargo.toml`** を「唯一の真実」とします。
+
+1.  **定義**: `src-tauri/Cargo.toml`内の`version = "x.y.z"`でバージョンを定義します。
+2.  **連携**: `tauri.conf.json`が`Cargo.toml`を自動的に読み込み、ビルド時にアプリに埋め込みます。
+3.  **取得**: フロントエンドからは `@tauri-apps/api/app` の `getVersion()` を使うことで、いつでもバージョン番号を取得できます。
+
+```typescript
+import { getVersion } from '@tauri-apps/api/app';
+const appVersion = await getVersion(); // "x.y.z"
+```
+
+### リリース作成フロー
+
+1.  **`main`ブランチを最新化**:
+    - リリース対象の機能がすべて`main`にマージされていることを確認します。
+2.  **バージョン更新**:
+    - `src-tauri/Cargo.toml` の `version` を更新します。
+3.  **コミット**:
+    - バージョン更新をコミットします (`git commit -m "chore: Bump version to vX.Y.Z"`)。
+4.  **アプリケーションのビルド**:
+    - `cargo tauri build` を実行し、配布用の成果物 (`.dmg`など) を作成します。
+5.  **GitHubリリース作成**:
+    - `gh release create` を使い、**`Cargo.toml`と全く同じバージョン番号**でタグとリリースを作成します。
+    - `--generate-notes` を使えば、リリースノートを自動生成できます。
+
+    ```bash
+    # 例: v0.2.0 のリリース
+    gh release create v0.2.0 \\
+        --generate-notes \\
+        --title "ReelVault v0.2.0" \\
+        src-tauri/target/release/bundle/macos/ReelVault.dmg
+    ```
+
 ## 自動化スクリプト設計
 
 ### スクリプト構造
