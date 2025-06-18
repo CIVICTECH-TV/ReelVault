@@ -19,6 +19,7 @@ mod commands {
 }
 
 mod logger;
+mod internal;
 
 // コマンドをインポート
 use commands::file_operations::*;
