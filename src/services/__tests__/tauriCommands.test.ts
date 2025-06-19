@@ -279,10 +279,11 @@ describe('tauriCommands', () => {
 
   describe('RestoreOperations', () => {
     it('should restore file successfully', async () => {
+      const mockRequestTime = '2025-06-19T14:54:42.449Z';
       vi.mocked(invoke).mockResolvedValue({ 
         key: 'test-key', 
         status: 'InProgress', 
-        requestTime: new Date().toISOString() 
+        requestTime: mockRequestTime 
       });
       const result = await RestoreOperations.restoreFile('test-key', mockAwsConfig, 'Standard');
       expect(invoke).toHaveBeenCalledWith('restore_file', { 
@@ -293,7 +294,7 @@ describe('tauriCommands', () => {
       expect(result).toEqual({ 
         key: 'test-key', 
         status: 'InProgress', 
-        requestTime: new Date().toISOString() 
+        requestTime: mockRequestTime 
       });
     });
 

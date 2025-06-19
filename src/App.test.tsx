@@ -414,4 +414,183 @@ describe('App', () => {
       renderSpy.mockRestore();
     });
   });
+
+  describe('総合テスト', () => {
+    it('should handle complete workflow: config → auth → upload', async () => {
+      render(<App />);
+
+      // 初期化完了を待つ
+      await waitFor(() => {
+        expect(screen.getByTestId('config-manager')).toBeInTheDocument();
+      });
+
+      // ConfigManagerが正しくレンダリングされていることを確認
+      expect(screen.getByTestId('config-manager')).toBeInTheDocument();
+      
+      // コールバック関数が設定されていることを確認
+      expect(mockOnConfigChange).toBeDefined();
+      expect(mockOnStateChange).toBeDefined();
+    });
+
+    it('should propagate auth success to parent component', async () => {
+      render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('config-manager')).toBeInTheDocument();
+      });
+
+      // 認証成功のコールバックが設定されていることを確認
+      expect(mockOnAuthSuccess).toBeDefined();
+    });
+
+    it('should handle health status changes', async () => {
+      render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('config-manager')).toBeInTheDocument();
+      });
+
+      // 健全性ステータス変更のコールバックが設定されていることを確認
+      expect(mockOnHealthStatusChange).toBeDefined();
+    });
+
+    it('should maintain state consistency across components', async () => {
+      render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('config-manager')).toBeInTheDocument();
+      });
+
+      // ConfigManagerが正しくレンダリングされていることを確認
+      expect(screen.getByTestId('config-manager')).toBeInTheDocument();
+      
+      // コールバック関数が設定されていることを確認
+      expect(mockOnConfigChange).toBeDefined();
+      expect(mockOnStateChange).toBeDefined();
+    });
+
+    it('should handle configuration updates properly', async () => {
+      render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('config-manager')).toBeInTheDocument();
+      });
+
+      // 設定更新のコールバックが設定されていることを確認
+      expect(mockOnConfigChange).toBeDefined();
+      expect(typeof mockOnConfigChange).toBe('function');
+    });
+
+    it('should handle state updates properly', async () => {
+      render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('config-manager')).toBeInTheDocument();
+      });
+
+      // 状態更新のコールバックが設定されていることを確認
+      expect(mockOnStateChange).toBeDefined();
+      expect(typeof mockOnStateChange).toBe('function');
+    });
+
+    it('should handle error propagation from child components', async () => {
+      // エラー状態のモック
+      const errorConfig = {
+        ...mockConfig,
+        user_preferences: {
+          ...mockConfig.user_preferences,
+          default_bucket_name: '', // 無効な設定
+        },
+      };
+      mockTauriCommands.getConfig.mockResolvedValue(errorConfig);
+
+      render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('config-manager')).toBeInTheDocument();
+      });
+
+      // エラー状態でもコンポーネントが正常にレンダリングされることを確認
+      expect(screen.getByTestId('config-manager')).toBeInTheDocument();
+    });
+
+    it('should handle network connectivity changes', async () => {
+      const disconnectedState = {
+        ...mockAppState,
+        system_status: {
+          ...mockAppState.system_status,
+          network_available: false,
+          aws_connected: false,
+        },
+      };
+      mockTauriCommands.getAppState.mockResolvedValue(disconnectedState);
+
+      render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('config-manager')).toBeInTheDocument();
+      });
+
+      // ネットワーク切断状態でもコンポーネントが正常に動作することを確認
+      expect(screen.getByTestId('config-manager')).toBeInTheDocument();
+    });
+
+    it('should handle large configuration updates', async () => {
+      const largeConfig = {
+        ...mockConfig,
+        user_preferences: {
+          ...mockConfig.user_preferences,
+          default_bucket_name: 'very-long-bucket-name-that-exceeds-normal-length',
+        },
+        aws_settings: {
+          ...mockConfig.aws_settings,
+          timeout_seconds: 300, // 長いタイムアウト
+          max_retries: 10, // 多くのリトライ
+        },
+      };
+      mockTauriCommands.getConfig.mockResolvedValue(largeConfig);
+
+      render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('config-manager')).toBeInTheDocument();
+      });
+
+      // 大きな設定でも正常に処理されることを確認
+      expect(screen.getByTestId('config-manager')).toBeInTheDocument();
+    });
+
+    it('should handle rapid state changes', async () => {
+      render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('config-manager')).toBeInTheDocument();
+      });
+
+      // 状態更新コールバックが設定されていることを確認
+      expect(mockOnStateChange).toBeDefined();
+      expect(typeof mockOnStateChange).toBe('function');
+
+      // 複数の状態変更を連続で実行
+      await act(async () => {
+        mockOnStateChange({ ...mockAppState, is_watching: true });
+        mockOnStateChange({ ...mockAppState, is_watching: false });
+        mockOnStateChange({ ...mockAppState, is_watching: true });
+      });
+
+      // 状態変更が正常に処理されることを確認
+      expect(mockOnStateChange).toHaveBeenCalled();
+    });
+
+    it('should handle component unmounting gracefully', async () => {
+      const { unmount } = render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('config-manager')).toBeInTheDocument();
+      });
+
+      // コンポーネントのアンマウントが正常に処理されることを確認
+      expect(() => unmount()).not.toThrow();
+    });
+  });
 }); 

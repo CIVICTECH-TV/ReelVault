@@ -279,8 +279,8 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
 
     return () => {
       console.log('🎧 進捗リスナーを解除中...');
-      unlisten.then(f => f());
-      testUnlisten.then(f => f());
+      if (unlisten && typeof unlisten.then === 'function') unlisten.then(f => f && typeof f === 'function' && f());
+      if (testUnlisten && typeof testUnlisten.then === 'function') testUnlisten.then(f => f && typeof f === 'function' && f());
     };
   }, [uploadConfig]); // uploadConfigに依存
 
