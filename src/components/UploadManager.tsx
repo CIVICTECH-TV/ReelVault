@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import { listen } from '@tauri-apps/api/event';
-import { TauriCommands, UploadItem, UploadStatus, UploadStatistics, FileSelection, UploadConfig, AwsCredentials, UploadProgressInfo } from '../types/tauri-commands';
+import { TauriCommands, UploadItem, UploadStatus, UploadStatistics, FileSelection, UploadConfig, AwsCredentials, UploadProgressInfo } from '../services/tauriCommands';
 import { debugLog, isDev, debugError, debugWarn, debugInfo } from '../utils/debug';
 import './UploadManager.css';
 

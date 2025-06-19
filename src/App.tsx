@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { listen } from '@tauri-apps/api/event';
-import { TauriCommands, AppConfig, AppState } from "./types/tauri-commands";
+import { TauriCommands, AppConfig, AppState } from "./services/tauriCommands";
 import { ConfigManager, ConfigManagerRef } from "./components/ConfigManager";
 import "./App.css";
 
