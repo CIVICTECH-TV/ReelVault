@@ -85,8 +85,8 @@ export const AwsOperations = {
     return invoke('test_s3_bucket_access', { credentials, bucketName });
   },
 
-  async listS3Objects(bucketName: string, prefix?: string, maxKeys?: number): Promise<S3Object[]> {
-    return invoke('list_s3_objects', { bucketName, prefix, maxKeys });
+  async listS3Objects(config: AwsConfig, prefix?: string): Promise<S3Object[]> {
+    return invoke('list_s3_objects', { config, prefix });
   },
 
   async getS3Object(bucketName: string, key: string): Promise<S3Object> {

@@ -176,11 +176,10 @@ describe('tauriCommands', () => {
 
     it('should list S3 objects successfully', async () => {
       vi.mocked(invoke).mockResolvedValue([mockS3Object]);
-      const result = await AwsOperations.listS3Objects('test-bucket', 'prefix/', 100);
-      expect(invoke).toHaveBeenCalledWith('list_s3_objects', { 
-        bucketName: 'test-bucket', 
-        prefix: 'prefix/', 
-        maxKeys: 100 
+      const result = await AwsOperations.listS3Objects(mockAwsConfig, 'prefix/');
+      expect(invoke).toHaveBeenCalledWith('list_s3_objects', {
+        config: mockAwsConfig,
+        prefix: 'prefix/'
       });
       expect(result).toEqual([mockS3Object]);
     });

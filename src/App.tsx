@@ -81,7 +81,7 @@ function App() {
 
   const handleAuthSuccess = () => {
     // 認証成功時に状態を再読み込み
-    TauriCommands.getAppState().then(setAppState);
+    TauriCommands.getAppState().then(setAppState).catch(() => {});
   };
 
   const handleHealthStatusChange = (status: { isHealthy: boolean; lastCheck: Date | null; bucketName: string | undefined }) => {
