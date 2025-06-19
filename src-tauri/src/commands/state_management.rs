@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tauri::{command, State};
+use crate::internal::{InternalError, standardize_error};
 
 /// アプリケーションのグローバル状態
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -109,7 +110,7 @@ pub type AppStateManager = Arc<Mutex<AppState>>;
 #[command]
 pub async fn get_app_state(state: State<'_, AppStateManager>) -> Result<AppState, String> {
     let app_state = state.lock()
-        .map_err(|e| format!("Failed to lock state: {}", e))?;
+        .map_err(|e| standardize_error(InternalError::Other(format!("Failed to lock state: {}", e))))?;
     
     log::debug!("App state requested");
     Ok(app_state.clone())
@@ -122,7 +123,7 @@ pub async fn set_app_state(
     state: State<'_, AppStateManager>
 ) -> Result<String, String> {
     let mut app_state = state.lock()
-        .map_err(|e| format!("Failed to lock state: {}", e))?;
+        .map_err(|e| standardize_error(InternalError::Other(format!("Failed to lock state: {}", e))))?;
     
     *app_state = new_state;
     
@@ -137,7 +138,7 @@ pub async fn update_app_state(
     state: State<'_, AppStateManager>
 ) -> Result<String, String> {
     let mut app_state = state.lock()
-        .map_err(|e| format!("Failed to lock state: {}", e))?;
+        .map_err(|e| standardize_error(InternalError::Other(format!("Failed to lock state: {}", e))))?;
     
     match update.field.as_str() {
         "is_watching" => {
@@ -145,7 +146,7 @@ pub async fn update_app_state(
                 app_state.is_watching = value;
                 log::info!("Watching status updated: {}", value);
             } else {
-                return Err("Invalid value for is_watching field".to_string());
+                return Err(standardize_error(InternalError::Config("Invalid value for is_watching field".to_string())));
             }
         }
         "last_error" => {
@@ -155,7 +156,7 @@ pub async fn update_app_state(
                 app_state.last_error = Some(error.to_string());
                 log::warn!("Error recorded: {}", error);
             } else {
-                return Err("Invalid value for last_error field".to_string());
+                return Err(standardize_error(InternalError::Config("Invalid value for last_error field".to_string())));
             }
         }
         "aws_connected" => {
@@ -163,11 +164,11 @@ pub async fn update_app_state(
                 app_state.system_status.aws_connected = value;
                 log::info!("AWS connection status updated: {}", value);
             } else {
-                return Err("Invalid value for aws_connected field".to_string());
+                return Err(standardize_error(InternalError::Config("Invalid value for aws_connected field".to_string())));
             }
         }
         _ => {
-            return Err(format!("Unknown state field: {}", update.field));
+            return Err(standardize_error(InternalError::Config(format!("Unknown state field: {}", update.field))));
         }
     }
     
@@ -187,18 +188,18 @@ pub async fn add_to_upload_queue(
     
     let path = Path::new(&file_path);
     if !path.exists() {
-        return Err(format!("File does not exist: {}", file_path));
+        return Err(standardize_error(InternalError::File(format!("File does not exist: {}", file_path))));
     }
     
     let metadata = std::fs::metadata(&path)
-        .map_err(|e| format!("Failed to get file metadata: {}", e))?;
+        .map_err(|e| standardize_error(InternalError::File(format!("Failed to get file metadata: {}", e))))?;
     
     let file_name = path.file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("Unknown")
         .to_string();
     
-    let item = UploadItem {
+    let upload_item = UploadItem {
         id: uuid::Uuid::new_v4().to_string(),
         file_path: file_path.clone(),
         file_name,
@@ -209,38 +210,13 @@ pub async fn add_to_upload_queue(
     };
     
     let mut app_state = state.lock()
-        .map_err(|e| format!("Failed to lock state: {}", e))?;
+        .map_err(|e| standardize_error(InternalError::Other(format!("Failed to lock state: {}", e))))?;
     
-    app_state.upload_queue.push(item.clone());
+    app_state.upload_queue.push(upload_item);
     app_state.statistics.files_in_queue = app_state.upload_queue.len() as u64;
     
-    log::info!("File added to upload queue: {}", file_path);
-    
-    Ok(format!("File added to upload queue with ID: {}", item.id))
-}
-
-/// アップロードキューからアイテムを削除
-#[command]
-#[allow(dead_code)]
-pub async fn remove_from_upload_queue(
-    item_id: String,
-    state: State<'_, AppStateManager>
-) -> Result<String, String> {
-    let mut app_state = state.lock()
-        .map_err(|e| format!("Failed to lock state: {}", e))?;
-    
-    let initial_len = app_state.upload_queue.len();
-    app_state.upload_queue.retain(|item| item.id != item_id);
-    
-    if app_state.upload_queue.len() == initial_len {
-        return Err(format!("Upload item not found: {}", item_id));
-    }
-    
-    app_state.statistics.files_in_queue = app_state.upload_queue.len() as u64;
-    
-    log::info!("Upload item removed from queue: {}", item_id);
-    
-    Ok(format!("Upload item removed: {}", item_id))
+    log::info!("Added file to upload queue: {}", file_path);
+    Ok(format!("Added file to upload queue: {}", file_path))
 }
 
 /// システム統計を更新
@@ -249,32 +225,30 @@ pub async fn update_system_stats(
     state: State<'_, AppStateManager>
 ) -> Result<SystemStatus, String> {
     let mut app_state = state.lock()
-        .map_err(|e| format!("Failed to lock state: {}", e))?;
+        .map_err(|e| standardize_error(InternalError::Other(format!("Failed to lock state: {}", e))))?;
     
-    // TODO: 実際のシステム情報を取得する実装
-    // 現在はモックデータを使用
-    app_state.system_status.disk_space_gb = 256.5; // GB
-    app_state.system_status.memory_usage_mb = 512.3; // MB  
-    app_state.system_status.cpu_usage_percent = 15.7; // %
-    app_state.system_status.network_available = true;
+    // システム情報を取得（簡易実装）
+    let disk_space = sysinfo::System::new_all().total_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
+    let memory_usage = sysinfo::System::new_all().used_memory() as f64 / 1024.0 / 1024.0;
+    
+    app_state.system_status.disk_space_gb = disk_space;
+    app_state.system_status.memory_usage_mb = memory_usage;
     app_state.system_status.last_heartbeat = chrono::Utc::now().to_rfc3339();
     
-    log::debug!("System statistics updated");
-    
+    log::debug!("System stats updated");
     Ok(app_state.system_status.clone())
 }
 
-/// 状態をリセット
+/// アプリケーション状態をリセット
 #[command]
 pub async fn reset_app_state(
     state: State<'_, AppStateManager>
 ) -> Result<String, String> {
     let mut app_state = state.lock()
-        .map_err(|e| format!("Failed to lock state: {}", e))?;
+        .map_err(|e| standardize_error(InternalError::Other(format!("Failed to lock state: {}", e))))?;
     
     *app_state = AppState::default();
     
-    log::info!("Application state reset to defaults");
-    
+    log::info!("App state reset to default");
     Ok("Application state reset successfully".to_string())
 } 

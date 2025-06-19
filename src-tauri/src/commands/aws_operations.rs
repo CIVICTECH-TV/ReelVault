@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use tauri::command;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use crate::internal::{InternalError, standardize_error};
 
 /// AWS接続設定
 #[derive(Debug, Deserialize, Clone)]
@@ -152,11 +153,11 @@ pub async fn upload_file(
     // ファイル存在確認
     let path = Path::new(&file_path);
     if !path.exists() {
-        return Err(format!("File does not exist: {}", file_path));
+        return Err(standardize_error(InternalError::File(format!("File does not exist: {}", file_path))));
     }
     
     if !path.is_file() {
-        return Err(format!("Path is not a file: {}", file_path));
+        return Err(standardize_error(InternalError::File(format!("Path is not a file: {}", file_path))));
     }
     
     // TODO: AWS SDK for Rustを使った実際のアップロード実装
@@ -219,10 +220,9 @@ pub async fn list_s3_objects(
     }
     
     // S3 APIを実行
-    let result = request.send().await.map_err(|e| {
-        log::error!("S3 list objects failed: {}", e);
-        format!("S3オブジェクト一覧の取得に失敗しました: {}", e)
-    })?;
+    let result = request.send().await
+        .map_err(|e| InternalError::S3(e.to_string()))
+        .map_err(standardize_error)?;
     
     // レスポンスをS3Object構造体に変換
     let mut objects = Vec::new();
@@ -260,7 +260,7 @@ pub async fn restore_file(
     // 復元ティアの検証
     match tier.as_str() {
         "Standard" | "Expedited" | "Bulk" => {},
-        _ => return Err(format!("Invalid restore tier: {}. Must be Standard, Expedited, or Bulk", tier)),
+        _ => return Err(standardize_error(InternalError::AwsConfig(format!("Invalid restore tier: {}. Must be Standard, Expedited, or Bulk", tier)))),
     }
     
     // TODO: AWS SDK for Rustを使った実際の復元リクエスト
@@ -334,7 +334,8 @@ pub async fn check_restore_status(
     if let Some(restore_info) = tracker.get_mut(&s3_key) {
         // 簡単なシミュレーション：リクエストから5分後に完了とする
         let request_time = chrono::DateTime::parse_from_rfc3339(&restore_info.request_time)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| InternalError::Metadata(format!("Failed to parse request time: {}", e)))
+            .map_err(standardize_error)?;
         let now = chrono::Utc::now();
         let elapsed = now.signed_duration_since(request_time.with_timezone(&chrono::Utc));
         
@@ -402,9 +403,9 @@ pub async fn download_s3_file(
     let path = Path::new(&local_path);
     if let Some(parent) = path.parent() {
         if !parent.exists() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                format!("Failed to create directory {}: {}", parent.display(), e)
-            })?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| InternalError::File(format!("Failed to create directory {}: {}", parent.display(), e)))
+                .map_err(standardize_error)?;
         }
     }
     
@@ -433,15 +434,18 @@ pub async fn download_s3_file(
         .key(&s3_key)
         .send()
         .await
-        .map_err(|e| format!("Failed to download from S3: {}", e))?;
+        .map_err(|e| InternalError::S3(e.to_string()))
+        .map_err(standardize_error)?;
     
     // レスポンスボディを取得
     let data = result.body.collect().await
-        .map_err(|e| format!("Failed to read S3 response body: {}", e))?;
+        .map_err(|e| InternalError::S3(format!("Failed to read S3 response body: {}", e)))
+        .map_err(standardize_error)?;
     
     // ローカルファイルに書き込み
     std::fs::write(&local_path, data.into_bytes())
-        .map_err(|e| format!("Failed to write file {}: {}", local_path, e))?;
+        .map_err(|e| InternalError::File(format!("Failed to write file {}: {}", local_path, e)))
+        .map_err(standardize_error)?;
     
     let total_bytes = std::fs::metadata(&local_path)
         .map(|m| m.len())

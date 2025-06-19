@@ -3,6 +3,7 @@ use tauri::command;
 use aws_config::{BehaviorVersion, Region};
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_sts::Client as StsClient;
+use crate::internal::{InternalError, standardize_error};
 
 // AWS設定構造体（他のモジュールと共有用）
 #[derive(Debug, Deserialize, Clone)]
@@ -171,13 +172,13 @@ pub async fn test_s3_bucket_access(
                         }
                         Err(e) => {
                             log::error!("Lifecycle policy verification failed for bucket {}: {}", bucket_name, e);
-                            return Err(format!("ライフサイクル設定の確認に失敗しました: {}", e));
+                            return Err(standardize_error(InternalError::AwsConfig(format!("ライフサイクル設定の確認に失敗しました: {}", e))));
                         }
                     }
                 }
                 Err(e) => {
                     log::error!("Failed to auto-setup lifecycle policy for bucket {}: {}", bucket_name, e);
-                    return Err(format!("ライフサイクル設定に失敗しました: {}", e));
+                    return Err(standardize_error(InternalError::AwsConfig(format!("ライフサイクル設定に失敗しました: {}", e))));
                 }
             }
             
@@ -466,7 +467,7 @@ async fn verify_lifecycle_policy_applied(
     loop {
         // タイムアウトチェック
         if start_time.elapsed() > timeout_duration {
-            return Err(format!("タイムアウト: {}秒以内にライフサイクル設定が確認できませんでした", timeout_seconds));
+            return Err(standardize_error(InternalError::Other(format!("タイムアウト: {}秒以内にライフサイクル設定が確認できませんでした", timeout_seconds))));
         }
         
         // ライフサイクル設定をチェック
@@ -506,6 +507,7 @@ async fn verify_lifecycle_policy_applied(
 
 #[cfg(target_os = "macos")]
 mod macos_keychain {
+    use crate::internal::{InternalError, standardize_error};
 
     /// Touch ID/Face ID必須でKeychainに保存
     pub fn save_password_with_biometry(
@@ -604,7 +606,7 @@ mod macos_keychain {
                 .to_string();
             
             if password.is_empty() {
-                Err("保存された認証情報が見つかりません".to_string())
+                Err(standardize_error(InternalError::Other("保存された認証情報が見つかりません".to_string())))
             } else {
                 log::info!("Touch ID/Face ID認証で情報を読み込みました");
                 Ok(password)
@@ -612,11 +614,11 @@ mod macos_keychain {
         } else {
             let error_msg = String::from_utf8_lossy(&output.stderr);
             if error_msg.contains("could not be found") {
-                Err("保存された認証情報が見つかりません".to_string())
+                Err(standardize_error(InternalError::Other("保存された認証情報が見つかりません".to_string())))
             } else if error_msg.contains("user canceled") {
-                Err("Touch ID/Face ID認証がキャンセルされました".to_string())
+                Err(standardize_error(InternalError::Other("Touch ID/Face ID認証がキャンセルされました".to_string())))
             } else {
-                Err(format!("Touch ID/Face ID認証に失敗しました: {}", error_msg.trim()))
+                Err(standardize_error(InternalError::Other(format!("Touch ID/Face ID認証に失敗しました: {}", error_msg.trim()))))
             }
         }
     }
@@ -624,19 +626,21 @@ mod macos_keychain {
 
 #[cfg(not(target_os = "macos"))]
 mod macos_keychain {
+    use crate::internal::{InternalError, standardize_error};
+
     pub fn save_password_with_biometry(
         _service: &str,
         _account: &str,
         _password: &str,
     ) -> Result<(), String> {
-        Err("Touch ID/Face ID is only available on macOS".to_string())
+        Err(standardize_error(InternalError::Other("Touch ID/Face ID is only available on macOS".to_string())))
     }
 
     pub fn load_password_with_biometry(
         _service: &str,
         _account: &str,
     ) -> Result<String, String> {
-        Err("Touch ID/Face ID is only available on macOS".to_string())
+        Err(standardize_error(InternalError::Other("Touch ID/Face ID is only available on macOS".to_string())))
     }
 
     pub fn is_biometry_available() -> bool {

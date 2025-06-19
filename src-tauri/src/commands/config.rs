@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
+use crate::internal::{InternalError, standardize_error};
 
 // 設定データ構造
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,27 +85,27 @@ impl Default for AwsSettings {
 }
 
 // 設定ファイルパス取得
-fn get_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+fn get_config_path(app: &AppHandle) -> Result<PathBuf, InternalError> {
     let app_data_dir = app
         .path()
         .app_data_dir()
-        .map_err(|e| format!("Failed to get app data directory: {}", e))?;
+        .map_err(|e| InternalError::Config(format!("Failed to get app data directory: {}", e)))?;
     
     // ディレクトリが存在しない場合は作成
     if !app_data_dir.exists() {
         fs::create_dir_all(&app_data_dir)
-            .map_err(|e| format!("Failed to create app data directory: {}", e))?;
+            .map_err(|e| InternalError::Config(format!("Failed to create app data directory: {}", e)))?;
     }
     
     Ok(app_data_dir.join("config.json"))
 }
 
 // バックアップファイルパス取得
-fn get_backup_path(app: &AppHandle) -> Result<PathBuf, String> {
+fn get_backup_path(app: &AppHandle) -> Result<PathBuf, InternalError> {
     let app_data_dir = app
         .path()
         .app_data_dir()
-        .map_err(|e| format!("Failed to get app data directory: {}", e))?;
+        .map_err(|e| InternalError::Config(format!("Failed to get app data directory: {}", e)))?;
     
     Ok(app_data_dir.join("config.backup.json"))
 }
@@ -157,7 +158,8 @@ fn validate_config(config: &AppConfig) -> ConfigValidationResult {
 
 #[tauri::command]
 pub async fn get_config(app: AppHandle) -> Result<AppConfig, String> {
-    let config_path = get_config_path(&app)?;
+    let config_path = get_config_path(&app)
+        .map_err(standardize_error)?;
     
     if !config_path.exists() {
         // 設定ファイルが存在しない場合はデフォルト設定を返す
@@ -166,10 +168,12 @@ pub async fn get_config(app: AppHandle) -> Result<AppConfig, String> {
     }
 
     let config_content = fs::read_to_string(&config_path)
-        .map_err(|e| format!("Failed to read config file: {}", e))?;
+        .map_err(|e| InternalError::Config(format!("Failed to read config file: {}", e)))
+        .map_err(standardize_error)?;
 
     let config: AppConfig = serde_json::from_str(&config_content)
-        .map_err(|e| format!("Failed to parse config file: {}", e))?;
+        .map_err(|e| InternalError::Config(format!("Failed to parse config file: {}", e)))
+        .map_err(standardize_error)?;
 
     Ok(config)
 }
@@ -179,24 +183,29 @@ pub async fn set_config(app: AppHandle, config: AppConfig) -> Result<bool, Strin
     // 設定検証
     let validation = validate_config(&config);
     if !validation.valid {
-        return Err(format!("Config validation failed: {}", validation.errors.join(", ")));
+        return Err(standardize_error(InternalError::Other(format!("Config validation failed: {}", validation.errors.join(", ")))));
     }
 
-    let config_path = get_config_path(&app)?;
+    let config_path = get_config_path(&app)
+        .map_err(standardize_error)?;
     
     // 既存の設定をバックアップ
     if config_path.exists() {
-        let backup_path = get_backup_path(&app)?;
+        let backup_path = get_backup_path(&app)
+            .map_err(standardize_error)?;
         fs::copy(&config_path, &backup_path)
-            .map_err(|e| format!("Failed to create backup: {}", e))?;
+            .map_err(|e| InternalError::Config(format!("Failed to create backup: {}", e)))
+            .map_err(standardize_error)?;
     }
 
     // 新しい設定を保存
     let config_json = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+        .map_err(|e| InternalError::Config(format!("Failed to serialize config: {}", e)))
+        .map_err(standardize_error)?;
 
     fs::write(&config_path, config_json)
-        .map_err(|e| format!("Failed to write config file: {}", e))?;
+        .map_err(|e| InternalError::Config(format!("Failed to write config file: {}", e)))
+        .map_err(standardize_error)?;
 
     Ok(true)
 }
@@ -253,7 +262,7 @@ pub async fn update_config(app: AppHandle, updates: HashMap<String, serde_json::
                 config.aws_settings.profile_name = value.as_str().map(String::from);
             }
             _ => {
-                return Err(format!("Unknown config key: {}", key));
+                return Err(standardize_error(InternalError::Other(format!("Unknown config key: {}", key))));
             }
         }
     }
@@ -285,32 +294,36 @@ pub async fn validate_config_data(config: AppConfig) -> Result<ConfigValidationR
 
 #[tauri::command]
 pub async fn backup_config(app: AppHandle) -> Result<String, String> {
-    let config_path = get_config_path(&app)?;
+    let config_path = get_config_path(&app)
+        .map_err(standardize_error)?;
     
     if !config_path.exists() {
-        return Err("No config file to backup".to_string());
+        return Err(standardize_error(InternalError::Other("No config file to backup".to_string())));
     }
 
     let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
     let app_data_dir = app
         .path()
         .app_data_dir()
-        .map_err(|e| format!("Failed to get app data directory: {}", e))?;
+        .map_err(|e| InternalError::Config(format!("Failed to get app data directory: {}", e)))
+        .map_err(standardize_error)?;
     
     let backup_path = app_data_dir.join(format!("config_backup_{}.json", timestamp));
     
     fs::copy(&config_path, &backup_path)
-        .map_err(|e| format!("Failed to create backup: {}", e))?;
+        .map_err(|e| InternalError::Config(format!("Failed to create backup: {}", e)))
+        .map_err(standardize_error)?;
 
     Ok(backup_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
 pub async fn export_config(app: AppHandle, export_path: Option<String>) -> Result<String, String> {
-    let config_path = get_config_path(&app)?;
+    let config_path = get_config_path(&app)
+        .map_err(standardize_error)?;
     
     if !config_path.exists() {
-        return Err("設定ファイルが存在しません".to_string());
+        return Err(standardize_error(InternalError::Other("設定ファイルが存在しません".to_string())));
     }
 
     let destination_path = if let Some(path) = export_path {
@@ -319,7 +332,8 @@ pub async fn export_config(app: AppHandle, export_path: Option<String>) -> Resul
         // デフォルトのエクスポートパス（デスクトップにタイムスタンプ付きで）
         let home_dir = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
-            .map_err(|_| "ホームディレクトリが取得できません".to_string())?;
+            .map_err(|_| InternalError::Config("ホームディレクトリが取得できません".to_string()))
+            .map_err(standardize_error)?;
         
         let desktop_path = PathBuf::from(home_dir).join("Desktop");
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
@@ -327,7 +341,8 @@ pub async fn export_config(app: AppHandle, export_path: Option<String>) -> Resul
     };
 
     fs::copy(&config_path, &destination_path)
-        .map_err(|e| format!("設定のエクスポートに失敗しました: {}", e))?;
+        .map_err(|e| InternalError::Config(format!("設定のエクスポートに失敗しました: {}", e)))
+        .map_err(standardize_error)?;
 
     Ok(destination_path.to_string_lossy().to_string())
 }
@@ -337,41 +352,48 @@ pub async fn import_config(app: AppHandle, import_path: String) -> Result<AppCon
     let import_file = PathBuf::from(import_path);
     
     if !import_file.exists() {
-        return Err("インポートファイルが存在しません".to_string());
+        return Err(standardize_error(InternalError::Other("インポートファイルが存在しません".to_string())));
     }
 
     if !import_file.is_file() {
-        return Err("指定されたパスはファイルではありません".to_string());
+        return Err(standardize_error(InternalError::Other("指定されたパスはファイルではありません".to_string())));
     }
 
     // インポートファイルの読み込み
     let import_content = fs::read_to_string(&import_file)
-        .map_err(|e| format!("インポートファイルの読み込みに失敗しました: {}", e))?;
+        .map_err(|e| InternalError::Config(format!("インポートファイルの読み込みに失敗しました: {}", e)))
+        .map_err(standardize_error)?;
 
     // JSONとして解析
     let imported_config: AppConfig = serde_json::from_str(&import_content)
-        .map_err(|e| format!("設定ファイルの形式が正しくありません: {}", e))?;
+        .map_err(|e| InternalError::Config(format!("設定ファイルの形式が正しくありません: {}", e)))
+        .map_err(standardize_error)?;
 
     // インポートされた設定を検証
     let validation = validate_config(&imported_config);
     if !validation.valid {
-        return Err(format!("インポートされた設定に問題があります: {}", validation.errors.join(", ")));
+        return Err(standardize_error(InternalError::Other(format!("インポートされた設定に問題があります: {}", validation.errors.join(", ")))));
     }
 
     // 現在の設定をバックアップしてから新しい設定を適用
-    let config_path = get_config_path(&app)?;
+    let config_path = get_config_path(&app)
+        .map_err(standardize_error)?;
     if config_path.exists() {
-        let backup_path = get_backup_path(&app)?;
+        let backup_path = get_backup_path(&app)
+            .map_err(standardize_error)?;
         fs::copy(&config_path, &backup_path)
-            .map_err(|e| format!("既存設定のバックアップに失敗しました: {}", e))?;
+            .map_err(|e| InternalError::Config(format!("既存設定のバックアップに失敗しました: {}", e)))
+            .map_err(standardize_error)?;
     }
 
     // 新しい設定を保存
     let config_json = serde_json::to_string_pretty(&imported_config)
-        .map_err(|e| format!("設定の保存に失敗しました: {}", e))?;
+        .map_err(|e| InternalError::Config(format!("設定の保存に失敗しました: {}", e)))
+        .map_err(standardize_error)?;
 
     fs::write(&config_path, config_json)
-        .map_err(|e| format!("設定ファイルの書き込みに失敗しました: {}", e))?;
+        .map_err(|e| InternalError::Config(format!("設定ファイルの書き込みに失敗しました: {}", e)))
+        .map_err(standardize_error)?;
 
     Ok(imported_config)
 }
@@ -381,19 +403,21 @@ pub async fn restore_config(app: AppHandle, backup_path: String) -> Result<AppCo
     let backup_file = PathBuf::from(backup_path);
     
     if !backup_file.exists() {
-        return Err("Backup file does not exist".to_string());
+        return Err(standardize_error(InternalError::Other("Backup file does not exist".to_string())));
     }
 
     let backup_content = fs::read_to_string(&backup_file)
-        .map_err(|e| format!("Failed to read backup file: {}", e))?;
+        .map_err(|e| InternalError::Config(format!("Failed to read backup file: {}", e)))
+        .map_err(standardize_error)?;
 
     let config: AppConfig = serde_json::from_str(&backup_content)
-        .map_err(|e| format!("Failed to parse backup file: {}", e))?;
+        .map_err(|e| InternalError::Config(format!("Failed to parse backup file: {}", e)))
+        .map_err(standardize_error)?;
 
     // 設定検証
     let validation = validate_config(&config);
     if !validation.valid {
-        return Err(format!("Backup config validation failed: {}", validation.errors.join(", ")));
+        return Err(standardize_error(InternalError::Other(format!("Backup config validation failed: {}", validation.errors.join(", ")))));
     }
 
     // 復元実行

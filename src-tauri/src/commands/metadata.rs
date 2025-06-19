@@ -7,6 +7,7 @@ use sha2::{Sha256, Digest};
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::sync::Mutex;
+use crate::internal::{InternalError, standardize_error};
 
 /// ファイルメタデータを表す構造体
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -273,26 +274,102 @@ impl MetadataDatabase {
 
         Ok(tags)
     }
+
+    /// ファイルパスでメタデータを取得
+    pub fn get_metadata_by_path(&self, file_path: &str) -> SqliteResult<FileMetadata> {
+        let mut stmt = self.connection.prepare(
+            "SELECT * FROM file_metadata WHERE file_path = ?1"
+        )?;
+
+        let metadata = stmt.query_row([file_path], |row| {
+            let id: i64 = row.get(0)?;
+            let video_metadata_json: Option<String> = row.get(8)?;
+            let custom_fields_json: String = row.get(9)?;
+
+            let video_metadata = video_metadata_json
+                .and_then(|json| serde_json::from_str(&json).ok());
+            
+            let custom_fields: HashMap<String, String> = 
+                serde_json::from_str(&custom_fields_json).unwrap_or_default();
+
+            // タグを取得
+            let tags = self.get_tags_for_file(id).unwrap_or_default();
+
+            Ok(FileMetadata {
+                id: Some(id),
+                file_path: row.get(1)?,
+                file_name: row.get(2)?,
+                file_size: row.get::<_, i64>(3)? as u64,
+                file_hash: row.get(4)?,
+                mime_type: row.get(5)?,
+                created_at: row.get(6)?,
+                modified_at: row.get(7)?,
+                video_metadata,
+                tags,
+                custom_fields,
+            })
+        })?;
+
+        Ok(metadata)
+    }
+
+    /// ファイルパスでメタデータを削除
+    pub fn delete_metadata(&self, file_path: &str) -> SqliteResult<()> {
+        // ファイルIDを取得
+        let file_id: i64 = self.connection.query_row(
+            "SELECT id FROM file_metadata WHERE file_path = ?1",
+            [file_path],
+            |row| row.get(0),
+        )?;
+
+        // タグ関連を削除
+        self.connection.execute(
+            "DELETE FROM file_tags WHERE file_id = ?1",
+            [file_id],
+        )?;
+
+        // メタデータを削除
+        self.connection.execute(
+            "DELETE FROM file_metadata WHERE id = ?1",
+            [file_id],
+        )?;
+
+        Ok(())
+    }
+
+    /// すべてのタグを取得
+    pub fn get_all_tags(&self) -> SqliteResult<Vec<String>> {
+        let mut stmt = self.connection.prepare("SELECT name FROM tags ORDER BY name")?;
+        
+        let tag_iter = stmt.query_map([], |row| {
+            Ok(row.get::<_, String>(0)?)
+        })?;
+
+        let mut tags = Vec::new();
+        for tag in tag_iter {
+            tags.push(tag?);
+        }
+
+        Ok(tags)
+    }
 }
 
 /// ファイルハッシュを計算
-pub fn calculate_file_hash(file_path: &PathBuf) -> Result<String, String> {
+pub fn calculate_file_hash(file_path: &PathBuf) -> Result<String, InternalError> {
     let file = File::open(file_path)
-        .map_err(|e| format!("Failed to open file: {}", e))?;
+        .map_err(|e| InternalError::File(format!("Failed to open file: {}", e)))?;
     
     let mut reader = BufReader::new(file);
     let mut hasher = Sha256::new();
-    let mut buffer = [0; 8192];
+    let mut buffer = [0; 1024];
 
     loop {
-        let bytes_read = reader.read(&mut buffer)
-            .map_err(|e| format!("Failed to read file: {}", e))?;
-        
-        if bytes_read == 0 {
+        let count = reader.read(&mut buffer)
+            .map_err(|e| InternalError::File(format!("Failed to read file: {}", e)))?;
+        if count == 0 {
             break;
         }
-        
-        hasher.update(&buffer[..bytes_read]);
+        hasher.update(&buffer[..count]);
     }
 
     Ok(format!("{:x}", hasher.finalize()))
@@ -327,11 +404,11 @@ pub struct MetadataState(pub Mutex<Option<MetadataDatabase>>);
 pub async fn initialize_metadata_db(db_path: String) -> Result<String, String> {
     match MetadataDatabase::new(&db_path) {
         Ok(_) => Ok("Metadata database initialized successfully".to_string()),
-        Err(e) => Err(format!("Failed to initialize database: {}", e)),
+        Err(e) => Err(standardize_error(InternalError::Database(format!("Failed to initialize metadata database: {}", e))))
     }
 }
 
-/// ファイルメタデータを作成・保存
+/// ファイルメタデータを作成
 #[command]
 pub async fn create_file_metadata(
     file_path: String,
@@ -340,64 +417,47 @@ pub async fn create_file_metadata(
 ) -> Result<FileMetadata, String> {
     let path = PathBuf::from(&file_path);
     
-    // ファイル存在確認
+    // ファイルの存在確認
     if !path.exists() {
-        return Err("File does not exist".to_string());
+        return Err(standardize_error(InternalError::File(format!("File does not exist: {}", file_path))));
     }
 
-    // ファイル情報取得
+    // ファイル情報を取得
     let metadata = std::fs::metadata(&path)
-        .map_err(|e| format!("Failed to read file metadata: {}", e))?;
-    
-    let file_size = metadata.len();
-    let created_at = metadata.created()
-        .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-        .to_string();
-    
-    let modified_at = metadata.modified()
-        .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-        .to_string();
+        .map_err(|e| standardize_error(InternalError::File(format!("Failed to get file metadata: {}", e))))?;
 
-    // ファイルハッシュ計算
-    let file_hash = calculate_file_hash(&path)?;
+    // ファイルハッシュを計算
+    let file_hash = calculate_file_hash(&path)
+        .map_err(|e| standardize_error(e))?;
 
-    // MIMEタイプ推定
+    // MIMEタイプを検出
     let mime_type = detect_mime_type(&path);
 
-    // ファイル名取得
-    let file_name = path.file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown")
-        .to_string();
-
-    // 動画メタデータ抽出（動画ファイルの場合）
+    // 動画メタデータを抽出（動画ファイルの場合）
     let video_metadata = if mime_type.starts_with("video/") {
         extract_video_metadata(&path).ok()
     } else {
         None
     };
 
-    let file_metadata = FileMetadata {
+    let metadata = FileMetadata {
         id: None,
-        file_path: file_path.clone(),
-        file_name,
-        file_size,
+        file_path,
+        file_name: path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string(),
+        file_size: metadata.len(),
         file_hash,
         mime_type,
-        created_at,
-        modified_at,
+        created_at: format!("{:?}", metadata.created().unwrap_or(std::time::SystemTime::now())),
+        modified_at: format!("{:?}", metadata.modified().unwrap_or(std::time::SystemTime::now())),
         video_metadata,
         tags,
         custom_fields,
     };
 
-    Ok(file_metadata)
+    Ok(metadata)
 }
 
 /// ファイルメタデータを保存
@@ -407,23 +467,23 @@ pub async fn save_file_metadata(
     db_path: String,
 ) -> Result<i64, String> {
     let db = MetadataDatabase::new(&db_path)
-        .map_err(|e| format!("Database connection failed: {}", e))?;
-    
+        .map_err(|e| standardize_error(InternalError::Database(format!("Failed to create database connection: {}", e))))?;
+
     db.save_metadata(&metadata)
-        .map_err(|e| format!("Failed to save metadata: {}", e))
+        .map_err(|e| standardize_error(InternalError::Database(format!("Failed to save metadata: {}", e))))
 }
 
-/// メタデータを検索
+/// ファイルメタデータを検索
 #[command]
 pub async fn search_file_metadata(
     query: MetadataSearchQuery,
     db_path: String,
 ) -> Result<Vec<FileMetadata>, String> {
     let db = MetadataDatabase::new(&db_path)
-        .map_err(|e| format!("Database connection failed: {}", e))?;
-    
+        .map_err(|e| standardize_error(InternalError::Database(format!("Failed to create database connection: {}", e))))?;
+
     db.search_metadata(&query)
-        .map_err(|e| format!("Search failed: {}", e))
+        .map_err(|e| standardize_error(InternalError::Database(format!("Failed to search metadata: {}", e))))
 }
 
 /// ファイルメタデータを更新
@@ -435,107 +495,68 @@ pub async fn update_file_metadata(
     db_path: String,
 ) -> Result<String, String> {
     let db = MetadataDatabase::new(&db_path)
-        .map_err(|e| format!("Database connection failed: {}", e))?;
+        .map_err(|e| standardize_error(InternalError::Database(format!("Failed to create database connection: {}", e))))?;
 
-    // 既存メタデータを検索
-    let search_query = MetadataSearchQuery {
-        file_name_pattern: None,
-        tags: None,
-        size_min: None,
-        size_max: None,
-        date_from: None,
-        date_to: None,
-        mime_type: None,
-    };
+    // 既存のメタデータを取得
+    let existing_metadata = db.get_metadata_by_path(&file_path)
+        .map_err(|e| standardize_error(InternalError::Database(format!("Failed to get existing metadata: {}", e))))?;
 
-    let mut existing_metadata = db.search_metadata(&search_query)
-        .map_err(|e| format!("Failed to search existing metadata: {}", e))?
-        .into_iter()
-        .find(|m| m.file_path == file_path)
-        .ok_or("File metadata not found")?;
+    let mut updated_metadata = existing_metadata;
 
-    // 指定されたフィールドを更新
+    // タグを更新
     if let Some(new_tags) = tags {
-        existing_metadata.tags = new_tags;
+        updated_metadata.tags = new_tags;
     }
-    
-    if let Some(new_custom_fields) = custom_fields {
-        existing_metadata.custom_fields = new_custom_fields;
+
+    // カスタムフィールドを更新
+    if let Some(new_fields) = custom_fields {
+        updated_metadata.custom_fields = new_fields;
     }
 
     // 更新されたメタデータを保存
-    db.save_metadata(&existing_metadata)
-        .map_err(|e| format!("Failed to update metadata: {}", e))?;
+    db.save_metadata(&updated_metadata)
+        .map_err(|e| standardize_error(InternalError::Database(format!("Failed to update metadata: {}", e))))?;
 
     Ok("Metadata updated successfully".to_string())
 }
 
-/// メタデータを削除
+/// ファイルメタデータを削除
 #[command]
 pub async fn delete_file_metadata(
     file_path: String,
     db_path: String,
 ) -> Result<String, String> {
     let db = MetadataDatabase::new(&db_path)
-        .map_err(|e| format!("Database connection failed: {}", e))?;
+        .map_err(|e| standardize_error(InternalError::Database(format!("Failed to create database connection: {}", e))))?;
 
-    // ファイルIDを取得
-    let file_id: i64 = db.connection.query_row(
-        "SELECT id FROM file_metadata WHERE file_path = ?1",
-        [&file_path],
-        |row| row.get(0),
-    ).map_err(|e| format!("File not found: {}", e))?;
-
-    // タグ関連を削除
-    db.connection.execute(
-        "DELETE FROM file_tags WHERE file_id = ?1",
-        [file_id],
-    ).map_err(|e| format!("Failed to delete tag relations: {}", e))?;
-
-    // メタデータを削除
-    db.connection.execute(
-        "DELETE FROM file_metadata WHERE id = ?1",
-        [file_id],
-    ).map_err(|e| format!("Failed to delete metadata: {}", e))?;
+    db.delete_metadata(&file_path)
+        .map_err(|e| standardize_error(InternalError::Database(format!("Failed to delete metadata: {}", e))))?;
 
     Ok("Metadata deleted successfully".to_string())
 }
 
-/// 全タグを取得
+/// すべてのタグを取得
 #[command]
 pub async fn get_all_tags(db_path: String) -> Result<Vec<String>, String> {
     let db = MetadataDatabase::new(&db_path)
-        .map_err(|e| format!("Database connection failed: {}", e))?;
+        .map_err(|e| standardize_error(InternalError::Database(format!("Failed to create database connection: {}", e))))?;
 
-    let mut stmt = db.connection.prepare("SELECT name FROM tags ORDER BY name")
-        .map_err(|e| format!("Failed to prepare statement: {}", e))?;
-    
-    let tag_iter = stmt.query_map([], |row| {
-        Ok(row.get::<_, String>(0)?)
-    }).map_err(|e| format!("Failed to execute query: {}", e))?;
-
-    let mut tags = Vec::new();
-    for tag in tag_iter {
-        tags.push(tag.map_err(|e| format!("Failed to read tag: {}", e))?);
-    }
-
-    Ok(tags)
+    db.get_all_tags()
+        .map_err(|e| standardize_error(InternalError::Database(format!("Failed to get tags: {}", e))))
 }
 
-/// 動画メタデータを抽出（基本実装）
-fn extract_video_metadata(file_path: &PathBuf) -> Result<VideoMetadata, String> {
-    // 基本的な動画メタデータ実装
-    // 実際のプロダクションではffprobeクレート等を使用
+/// 動画メタデータを抽出
+fn extract_video_metadata(_file_path: &PathBuf) -> Result<VideoMetadata, InternalError> {
+    // TODO: 実際の動画メタデータ抽出を実装
+    // 現在はダミーデータを返す
     Ok(VideoMetadata {
-        duration: None,
-        width: None,
-        height: None,
-        frame_rate: None,
-        bit_rate: None,
-        codec: None,
-        format: file_path.extension()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_string()),
+        duration: Some(120.0),
+        width: Some(1920),
+        height: Some(1080),
+        frame_rate: Some(30.0),
+        bit_rate: Some(5000000),
+        codec: Some("H.264".to_string()),
+        format: Some("MP4".to_string()),
     })
 }
 

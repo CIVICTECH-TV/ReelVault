@@ -8,9 +8,9 @@ use tokio::sync::mpsc;
 use tokio::time::sleep;
 use uuid::Uuid;
 
-
 use crate::commands::aws_auth::AwsCredentials;
 use crate::commands::metadata::create_file_metadata;
+use crate::internal::{InternalError, standardize_error};
 
 /// アップロードアイテムの状態
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -133,18 +133,18 @@ impl UploadQueue {
     }
     
     /// アップロード開始時の状態更新
-    pub fn start_upload(&mut self, item_id: &str) -> Result<(), String> {
+    pub fn start_upload(&mut self, item_id: &str) -> Result<(), InternalError> {
         if let Some(config) = &self.config {
             let current_active = self.get_active_upload_count();
             
             // 無料版の厳格な制限チェック
             if config.max_concurrent_uploads == 1 && current_active > 0 {
-                return Err(format!("無料版では同時アップロードは1つまでです。現在アクティブ: {}", current_active));
+                return Err(InternalError::Other(format!("無料版では同時アップロードは1つまでです。現在アクティブ: {}", current_active)));
             }
             
             if current_active >= config.max_concurrent_uploads {
-                return Err(format!("同時アップロード数の上限に達しています: {}/{}", 
-                                 current_active, config.max_concurrent_uploads));
+                return Err(InternalError::Other(format!("同時アップロード数の上限に達しています: {}/{}", 
+                                 current_active, config.max_concurrent_uploads)));
             }
         }
         
@@ -157,7 +157,7 @@ impl UploadQueue {
             log::info!("Upload started: {} (active count: {})", item_id, self.active_upload_count);
             Ok(())
         } else {
-            Err(format!("Upload item not found: {}", item_id))
+            Err(InternalError::Other(format!("Upload item not found: {}", item_id)))
         }
     }
     
@@ -217,27 +217,19 @@ impl UploadQueue {
     }
     
     /// 無料版制限チェック
-    pub fn check_free_tier_limits(&self, new_files_count: usize) -> Result<(), String> {
+    pub fn check_free_tier_limits(&self, new_files_count: usize) -> Result<(), InternalError> {
         if let Some(config) = &self.config {
-            if config.max_concurrent_uploads == 1 {
-                // 無料版の場合
-                let current_active = self.get_active_upload_count();
-                let pending_count = self.items.iter()
-                    .filter(|item| item.status == UploadStatus::Pending)
-                    .count();
-                
-                if current_active > 0 && new_files_count > 0 {
-                    return Err(format!(
-                        "無料版では同時処理に制限があります。現在処理中: {}ファイル。完了後に追加してください。",
-                        current_active
-                    ));
+            if config.tier == UploadTier::Free {
+                // 無料版の制限チェック
+                let total_files = self.items.len() + new_files_count;
+                if total_files > 10 {
+                    return Err(InternalError::Other("無料版では最大10ファイルまでアップロードできます".to_string()));
                 }
                 
-                if pending_count > 0 && new_files_count > 0 {
-                    return Err(format!(
-                        "無料版では待機中のファイルがある場合、新しいファイルを追加できません。待機中: {}ファイル",
-                        pending_count
-                    ));
+                let total_size_mb = (self.total_uploaded_bytes + 
+                    self.items.iter().map(|i| i.file_size).sum::<u64>()) / 1024 / 1024;
+                if total_size_mb > 100 {
+                    return Err(InternalError::Other("無料版では最大100MBまでアップロードできます".to_string()));
                 }
             }
         }
@@ -284,86 +276,57 @@ pub async fn initialize_upload_queue(
     config: UploadConfig,
     queue_state: State<'_, UploadQueueState>,
 ) -> Result<String, String> {
-    // 🔍 受信した設定をデバッグ出力
-    log::info!("🔧 受信した設定: tier={:?}, chunk_size_mb={}, max_concurrent_uploads={}, max_concurrent_parts={}, adaptive_chunk_size={}, min_chunk_size_mb={}, max_chunk_size_mb={}", 
-               config.tier, config.chunk_size_mb, config.max_concurrent_uploads, config.max_concurrent_parts, 
-               config.adaptive_chunk_size, config.min_chunk_size_mb, config.max_chunk_size_mb);
-    
     let mut queue = queue_state.lock()
-        .map_err(|e| format!("Failed to lock upload queue: {}", e))?;
+        .map_err(|e| standardize_error(InternalError::Other(format!("Failed to lock upload queue: {}", e))))?;
     
     queue.config = Some(config);
+    queue.is_processing = false;
     queue.items.clear();
     queue.active_uploads.clear();
-    queue.is_processing = false;
+    queue.total_uploaded_bytes = 0;
+    queue.total_files_uploaded = 0;
+    queue.active_upload_count = 0;
     
-    log::info!("Upload queue initialized successfully");
-    Ok("Upload queue initialized".to_string())
+    log::info!("Upload queue initialized with configuration");
+    Ok("Upload queue initialized successfully".to_string())
 }
 
 /// ファイル選択ダイアログを開く
 #[command]
 pub async fn open_file_dialog(
-    app_handle: AppHandle,
+    _app_handle: AppHandle,
     multiple: bool,
     _file_types: Option<Vec<String>>,
 ) -> Result<FileSelection, String> {
-    use tauri_plugin_dialog::DialogExt;
-    use std::sync::mpsc;
-    
-    log::info!("Opening file dialog, multiple: {}", multiple);
-    
-    let (tx, rx) = mpsc::channel();
-    
-    if multiple {
-        // 複数ファイル選択
-        app_handle.dialog().file().pick_files(move |file_paths| {
-            let _ = tx.send(file_paths);
-        });
+    let files = if multiple {
+        rfd::FileDialog::new()
+            .set_title("Select files to upload")
+            .pick_files()
     } else {
-        // 単一ファイル選択
-        app_handle.dialog().file().pick_file(move |file_path| {
-            let paths = file_path.map(|p| vec![p]);
-            let _ = tx.send(paths);
-        });
-    }
-    
-    // 結果を待機
-    let selected_paths = match rx.recv() {
-        Ok(Some(paths)) => paths,
-        Ok(None) => {
-            log::info!("No files selected");
-            return Ok(FileSelection {
-                file_count: 0,
-                total_size: 0,
-                selected_files: vec![],
-            });
-        }
-        Err(e) => {
-            return Err(format!("Failed to receive file dialog result: {}", e));
-        }
+        rfd::FileDialog::new()
+            .set_title("Select a file to upload")
+            .pick_file()
+            .map(|f| vec![f])
     };
-    
-    let mut selected_files = Vec::new();
-    let mut total_size = 0u64;
-    
-    for path in selected_paths {
-        let path_str = path.to_string();
-        selected_files.push(path_str.clone());
-        
-        if let Ok(metadata) = std::fs::metadata(&path_str) {
-            total_size += metadata.len();
+
+    match files {
+        Some(selected_files) => {
+            let total_size: u64 = selected_files.iter()
+                .map(|f| f.as_path().metadata().map(|m| m.len()).unwrap_or(0))
+                .sum();
+            
+            let file_paths: Vec<String> = selected_files.iter()
+                .map(|f| f.as_path().to_string_lossy().to_string())
+                .collect();
+            
+            Ok(FileSelection {
+                selected_files: file_paths,
+                total_size,
+                file_count: selected_files.len() as u32,
+            })
         }
+        None => Err(standardize_error(InternalError::Other("No files selected".to_string())))
     }
-    
-    log::info!("File dialog result: {} files selected, total size: {} bytes", 
-               selected_files.len(), total_size);
-    
-    Ok(FileSelection {
-        file_count: selected_files.len() as u32,
-        total_size,
-        selected_files,
-    })
 }
 
 /// ファイルをアップロードキューに追加
@@ -374,34 +337,40 @@ pub async fn add_files_to_upload_queue(
     queue_state: State<'_, UploadQueueState>,
 ) -> Result<String, String> {
     let mut queue = queue_state.lock()
-        .map_err(|e| format!("Failed to lock upload queue: {}", e))?;
+        .map_err(|e| standardize_error(InternalError::Other(format!("Failed to lock upload queue: {}", e))))?;
     
-    // 無料版制限チェック
-    queue.check_free_tier_limits(file_paths.len())?;
+    // 無料版の制限チェック
+    queue.check_free_tier_limits(file_paths.len())
+        .map_err(|e| standardize_error(e))?;
     
-    let mut added_files = Vec::new();
+    let _config = queue.config.as_ref()
+        .ok_or_else(|| standardize_error(InternalError::Config("Upload configuration not initialized".to_string())))?;
     
-    for file_path in file_paths {
-        let path = Path::new(&file_path);
-        if !path.exists() {
-            log::warn!("File does not exist, skipping: {}", file_path);
-            continue;
+    for file_path in &file_paths {
+        // ファイルの存在確認
+        if !Path::new(&file_path).exists() {
+            return Err(standardize_error(InternalError::File(format!("File not found: {}", file_path))));
         }
         
-        let metadata = std::fs::metadata(&path)
-            .map_err(|e| format!("Failed to get file metadata for {}: {}", file_path, e))?;
+        // S3キーを生成
+        let s3_key = generate_s3_key(&file_path, &s3_key_config)
+            .map_err(|e| standardize_error(InternalError::Other(e.to_string())))?;
         
-        let file_name = path.file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("Unknown")
+        // ファイル情報を取得
+        let metadata = std::fs::metadata(&file_path)
+            .map_err(|e| standardize_error(InternalError::File(format!("Failed to get file metadata: {}", e))))?;
+        
+        let file_name = Path::new(&file_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
             .to_string();
         
-        let s3_key = generate_s3_key(&file_path, &s3_key_config)?;
-        
+        // アップロードアイテムを作成
         let item = UploadItem {
             id: Uuid::new_v4().to_string(),
             file_path: file_path.clone(),
-            file_name: file_name.clone(),
+            file_name,
             file_size: metadata.len(),
             s3_key,
             status: UploadStatus::Pending,
@@ -417,51 +386,32 @@ pub async fn add_files_to_upload_queue(
         };
         
         queue.items.push(item);
-        added_files.push(file_name);
-        
-        log::info!("Added file to upload queue: {}", file_path);
     }
     
-    if added_files.is_empty() {
-        return Err("No valid files were added to the upload queue".to_string());
-    }
-    
-    let message = format!("Added {} files to upload queue: {}", 
-                         added_files.len(), 
-                         added_files.join(", "));
-    
-    log::info!("{}", message);
-    Ok(message)
+    log::info!("Added {} files to upload queue", file_paths.len());
+    Ok(format!("Added {} files to upload queue", file_paths.len()))
 }
 
-/// アップロードキューからアイテムを削除
+/// アップロードアイテムを削除
 #[command]
 pub async fn remove_upload_item(
     item_id: String,
     queue_state: State<'_, UploadQueueState>,
 ) -> Result<String, String> {
     let mut queue = queue_state.lock()
-        .map_err(|e| format!("Failed to lock upload queue: {}", e))?;
+        .map_err(|e| standardize_error(InternalError::Other(format!("Failed to lock upload queue: {}", e))))?;
     
-    // アクティブなアップロードの場合はキャンセル
-    if let Some(progress) = queue.active_uploads.get(&item_id) {
-        if progress.status == UploadStatus::InProgress {
-            // TODO: 実際のアップロードキャンセル処理
-            log::info!("Cancelling active upload: {}", item_id);
-        }
-    }
-    
+    let initial_count = queue.items.len();
+    queue.items.retain(|item| item.id != item_id);
     queue.active_uploads.remove(&item_id);
     
-    let initial_len = queue.items.len();
-    queue.items.retain(|item| item.id != item_id);
-    
-    if queue.items.len() == initial_len {
-        return Err(format!("Upload item not found: {}", item_id));
+    let removed_count = initial_count - queue.items.len();
+    if removed_count > 0 {
+        log::info!("Removed upload item: {}", item_id);
+        Ok(format!("Removed {} upload item(s)", removed_count))
+    } else {
+        Err(standardize_error(InternalError::Other(format!("Upload item not found: {}", item_id))))
     }
-    
-    log::info!("Removed item from upload queue: {}", item_id);
-    Ok("Item removed from upload queue".to_string())
 }
 
 /// アップロード処理を開始
@@ -471,42 +421,29 @@ pub async fn start_upload_processing(
     queue_state: State<'_, UploadQueueState>,
 ) -> Result<String, String> {
     let mut queue = queue_state.lock()
-        .map_err(|e| format!("Failed to lock upload queue: {}", e))?;
+        .map_err(|e| standardize_error(InternalError::Other(format!("Failed to lock upload queue: {}", e))))?;
     
     if queue.is_processing {
-        return Ok("Upload processing is already running".to_string());
+        return Err(standardize_error(InternalError::Other("Upload processing is already running".to_string())));
     }
     
-    let config = queue.config.clone()
-        .ok_or("Upload queue not initialized")?;
+    let config = queue.config.as_ref()
+        .ok_or_else(|| standardize_error(InternalError::Config("Upload configuration not initialized".to_string())))?
+        .clone();
     
     queue.is_processing = true;
     drop(queue); // ロックを解放
     
-    // テスト用のイベント送信
-    log::info!("Sending test event to frontend");
-    if let Err(e) = app_handle.emit("test-event", "Upload processing starting") {
-        log::error!("Failed to emit test event: {}", e);
-    } else {
-        log::info!("Test event emitted successfully");
-    }
-    
     // バックグラウンドでアップロード処理を開始
-    let queue_clone = Arc::clone(&queue_state.inner());
-    let app_handle_clone = app_handle.clone();
+    let queue_state_clone = queue_state.inner().clone();
+    let config_clone = config.clone();
     
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async move {
-            log::info!("Background upload processing thread started");
-            if let Err(e) = process_upload_queue(queue_clone, app_handle_clone, config).await {
-                log::error!("Upload processing failed: {}", e);
-            }
-            log::info!("Background upload processing thread finished");
-        });
+    tokio::spawn(async move {
+        if let Err(e) = process_upload_queue(queue_state_clone, app_handle, config_clone).await {
+            log::error!("Upload processing failed: {}", e);
+        }
     });
     
-    log::info!("Upload processing started");
     Ok("Upload processing started".to_string())
 }
 
@@ -516,16 +453,19 @@ pub async fn stop_upload_processing(
     queue_state: State<'_, UploadQueueState>,
 ) -> Result<String, String> {
     let mut queue = queue_state.lock()
-        .map_err(|e| format!("Failed to lock upload queue: {}", e))?;
+        .map_err(|e| standardize_error(InternalError::Other(format!("Failed to lock upload queue: {}", e))))?;
     
     queue.is_processing = false;
     
-    // アクティブなアップロードを一時停止
-    for (_, progress) in queue.active_uploads.iter_mut() {
-        if progress.status == UploadStatus::InProgress {
-            progress.status = UploadStatus::Paused;
+    // 進行中のアップロードをキャンセル
+    for item in queue.items.iter_mut() {
+        if item.status == UploadStatus::InProgress {
+            item.status = UploadStatus::Cancelled;
         }
     }
+    
+    queue.active_uploads.clear();
+    queue.active_upload_count = 0;
     
     log::info!("Upload processing stopped");
     Ok("Upload processing stopped".to_string())
@@ -537,7 +477,7 @@ pub async fn get_upload_queue_status(
     queue_state: State<'_, UploadQueueState>,
 ) -> Result<UploadStatistics, String> {
     let queue = queue_state.lock()
-        .map_err(|e| format!("Failed to lock upload queue: {}", e))?;
+        .map_err(|e| standardize_error(InternalError::Other(format!("Failed to lock upload queue: {}", e))))?;
     
     let total_files = queue.items.len() as u64;
     let completed_files = queue.items.iter()
@@ -556,18 +496,18 @@ pub async fn get_upload_queue_status(
     let total_bytes: u64 = queue.items.iter().map(|item| item.file_size).sum();
     let uploaded_bytes: u64 = queue.items.iter().map(|item| item.uploaded_bytes).sum();
     
-    let average_speed_mbps = if !queue.active_uploads.is_empty() {
+    let average_speed = if !queue.active_uploads.is_empty() {
         queue.active_uploads.values()
-            .map(|p| p.speed_mbps)
+            .map(|progress| progress.speed_mbps)
             .sum::<f64>() / queue.active_uploads.len() as f64
     } else {
         0.0
     };
     
-    let estimated_time_remaining = if average_speed_mbps > 0.0 {
-        let remaining_bytes = total_bytes - uploaded_bytes;
-        let remaining_mb = remaining_bytes as f64 / (1024.0 * 1024.0);
-        Some((remaining_mb / average_speed_mbps) as u64)
+    let estimated_time = if average_speed > 0.0 {
+        let remaining_bytes = total_bytes.saturating_sub(uploaded_bytes);
+        let remaining_mb = remaining_bytes as f64 / 1024.0 / 1024.0;
+        Some((remaining_mb / average_speed) as u64)
     } else {
         None
     };
@@ -580,104 +520,94 @@ pub async fn get_upload_queue_status(
         in_progress_files,
         total_bytes,
         uploaded_bytes,
-        average_speed_mbps,
-        estimated_time_remaining,
+        average_speed_mbps: average_speed,
+        estimated_time_remaining: estimated_time,
     })
 }
 
-/// アップロードキューの全アイテムを取得
+/// アップロードキューアイテムを取得
 #[command]
 pub async fn get_upload_queue_items(
     queue_state: State<'_, UploadQueueState>,
 ) -> Result<Vec<UploadItem>, String> {
     let queue = queue_state.lock()
-        .map_err(|e| format!("Failed to lock upload queue: {}", e))?;
+        .map_err(|e| standardize_error(InternalError::Other(format!("Failed to lock upload queue: {}", e))))?;
     
     Ok(queue.items.clone())
 }
 
-/// 特定のアイテムのアップロードを再試行
+/// アップロードアイテムをリトライ
 #[command]
 pub async fn retry_upload_item(
     item_id: String,
     queue_state: State<'_, UploadQueueState>,
 ) -> Result<String, String> {
     let mut queue = queue_state.lock()
-        .map_err(|e| format!("Failed to lock upload queue: {}", e))?;
+        .map_err(|e| standardize_error(InternalError::Other(format!("Failed to lock upload queue: {}", e))))?;
     
     if let Some(item) = queue.items.iter_mut().find(|i| i.id == item_id) {
-        if item.status == UploadStatus::Failed {
-            item.status = UploadStatus::Pending;
-            item.progress = 0.0;
-            item.uploaded_bytes = 0;
-            item.error_message = None;
-            item.retry_count += 1;
-            
-            log::info!("Retry scheduled for upload item: {}", item_id);
-            Ok("Upload retry scheduled".to_string())
-        } else {
-            Err(format!("Item {} is not in failed state", item_id))
-        }
+        item.status = UploadStatus::Pending;
+        item.progress = 0.0;
+        item.uploaded_bytes = 0;
+        item.error_message = None;
+        item.retry_count += 1;
+        
+        log::info!("Retrying upload item: {}", item_id);
+        Ok("Upload item queued for retry".to_string())
     } else {
-        Err(format!("Upload item not found: {}", item_id))
+        Err(standardize_error(InternalError::Other(format!("Upload item not found: {}", item_id))))
     }
 }
 
-/// S3キーを生成する
-fn generate_s3_key(file_path: &str, config: &S3KeyConfig) -> Result<String, String> {
+/// S3キーを生成
+fn generate_s3_key(file_path: &str, config: &S3KeyConfig) -> Result<String, InternalError> {
     let path = Path::new(file_path);
     let file_name = path.file_name()
-        .and_then(|s| s.to_str())
-        .ok_or("Invalid file name")?;
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| InternalError::File("Invalid file name".to_string()))?;
     
-    let mut key_parts = Vec::new();
+    let mut s3_key = String::new();
     
-    // プレフィックスを追加（末尾スラッシュを除去）
+    // プレフィックスを追加
     if let Some(prefix) = &config.prefix {
-        let clean_prefix = prefix.trim_end_matches('/');
-        if !clean_prefix.is_empty() {
-            key_parts.push(clean_prefix.to_string());
+        s3_key.push_str(prefix);
+        if !s3_key.ends_with('/') {
+            s3_key.push('/');
         }
     }
     
     // 日付フォルダを追加
     if config.use_date_folder {
-        let now = chrono::Utc::now();
-        key_parts.push(now.format("%Y/%m/%d").to_string());
+        let date = chrono::Utc::now().format("%Y/%m/%d");
+        s3_key.push_str(&date.to_string());
+        s3_key.push('/');
     }
     
     // ディレクトリ構造を保持
-            if config.preserve_directory_structure {
-            if let Some(parent) = path.parent() {
-                if let Some(_parent_str) = parent.to_str() {
-                // ホームディレクトリ以下の相対パスを使用
-                if let Some(home_dir) = dirs::home_dir() {
-                    if let Ok(relative) = path.strip_prefix(&home_dir) {
-                        if let Some(parent) = relative.parent() {
-                                                         if let Some(parent_str) = parent.to_str() {
-                                 key_parts.push(parent_str.to_string());
-                            }
-                        }
-                    }
+    if config.preserve_directory_structure {
+        if let Some(parent) = path.parent() {
+            if let Some(parent_str) = parent.to_str() {
+                if !parent_str.is_empty() && parent_str != "." {
+                    s3_key.push_str(parent_str);
+                    s3_key.push('/');
                 }
             }
         }
     }
     
-    // カスタム命名パターン
-    let final_name = if let Some(pattern) = &config.custom_naming_pattern {
-        // 簡単なパターン置換（拡張可能）
-        pattern
+    // カスタム命名パターンを適用
+    if let Some(pattern) = &config.custom_naming_pattern {
+        // 簡易的なパターン置換
+        let custom_name = pattern
             .replace("{filename}", file_name)
             .replace("{timestamp}", &chrono::Utc::now().timestamp().to_string())
-            .replace("{uuid}", &Uuid::new_v4().to_string())
+            .replace("{uuid}", &Uuid::new_v4().to_string());
+        s3_key.push_str(&custom_name);
     } else {
-        file_name.to_string()
-    };
+        s3_key.push_str(file_name);
+    }
     
-    key_parts.push(final_name);
-    
-    Ok(key_parts.join("/"))
+    Ok(s3_key)
 }
 
 /// バックグラウンドでアップロードキューを処理
@@ -709,66 +639,49 @@ async fn process_upload_queue(
         }
         
         // 新しいアップロードを開始できるかチェック
-        let pending_items = {
+        let (should_wait, pending_items) = {
             let mut queue = queue_state.lock()
                 .map_err(|e| format!("Failed to lock queue: {}", e))?;
-            
             let current_active = queue.get_active_upload_count();
-            
-            log::info!("Concurrent upload check: {} active, max: {}", current_active, max_concurrent);
-            
             if current_active >= max_concurrent {
-                log::info!("Max concurrent uploads reached ({}), waiting...", current_active);
-                drop(queue);
-                sleep(Duration::from_millis(1000)).await;
-                continue;
-            }
-            
-            let available_slots = max_concurrent.saturating_sub(current_active);
-            let mut pending = Vec::new();
-            
-            // 無料版の場合は特に厳格に1つずつ処理
-            let max_new_uploads = if max_concurrent == 1 {
-                if current_active > 0 { 0 } else { 1 }
+                (true, Vec::new())
             } else {
-                available_slots
-            };
-            
-            // Pendingアイテムを取得（借用の問題を回避するため、IDのみ収集）
-            let pending_item_ids: Vec<String> = queue.items.iter()
-                .filter(|item| item.status == UploadStatus::Pending)
-                .take(max_new_uploads)
-                .map(|item| item.id.clone())
-                .collect();
-            
-            // 状態を更新してアイテムを取得
-            for item_id in pending_item_ids {
-                match queue.start_upload(&item_id) {
-                    Ok(()) => {
-                        if let Some(item) = queue.items.iter().find(|i| i.id == item_id) {
-                            log::info!("Starting upload for: {} (slot {}/{})", 
-                                       item.file_name, pending.len() + 1, max_new_uploads);
-                            pending.push(item.clone());
-                            
-                            // 無料版では確実に1つずつ
-                            if max_concurrent == 1 {
-                                break;
+                let available_slots = max_concurrent.saturating_sub(current_active);
+                let mut pending = Vec::new();
+                let max_new_uploads = if max_concurrent == 1 {
+                    if current_active > 0 { 0 } else { 1 }
+                } else {
+                    available_slots
+                };
+                let pending_item_ids: Vec<String> = queue.items.iter()
+                    .filter(|item| item.status == UploadStatus::Pending)
+                    .take(max_new_uploads)
+                    .map(|item| item.id.clone())
+                    .collect();
+                for item_id in pending_item_ids {
+                    match queue.start_upload(&item_id) {
+                        Ok(()) => {
+                            if let Some(item) = queue.items.iter().find(|i| i.id == item_id) {
+                                pending.push(item.clone());
+                                if max_concurrent == 1 {
+                                    break;
+                                }
                             }
                         }
-                    }
-                    Err(e) => {
-                        log::error!("Failed to start upload for {}: {}", item_id, e);
-                        break;
+                        Err(e) => {
+                            log::error!("Failed to start upload for {}: {}", item_id, e);
+                            break;
+                        }
                     }
                 }
+                (false, pending)
             }
-            
-            if pending.is_empty() {
-                log::debug!("No pending items to process (active: {}, max: {})", current_active, max_concurrent);
-            }
-            
-            pending
         };
+        
+        if should_wait {
+            sleep(Duration::from_millis(1000)).await;
+            continue;
+        }
         
         // 新しいアップロードタスクを開始
         for item in pending_items {
@@ -883,7 +796,7 @@ async fn process_upload_queue(
                     log::info!("📊 Cleanup summary - Active count: {}, Active uploads: {}", 
                                queue.active_upload_count, queue.active_uploads.len());
                 }
-            }
+            } // ロックをここで解放
             
             // フロントエンドに進捗を通知
             log::info!("Emitting progress event to frontend: {:.1}% for {}", 
@@ -912,21 +825,21 @@ async fn process_upload_queue(
         };
         
         // 全てのファイルが完了した場合は処理を停止
-        if all_completed && !has_active {
-            log::info!("All uploads completed, stopping upload processing");
-            let mut queue = queue_state.lock()
-                .map_err(|e| format!("Failed to lock queue: {}", e))?;
-            queue.is_processing = false;
+        if all_completed {
+            log::info!("🎉 All uploads completed! Stopping processing");
             break;
         }
         
-        if has_pending && !has_active {
-            log::warn!("Upload seems stalled: pending items found but no active uploads");
+        // 待機時間を設定
+        if !has_pending && !has_active {
+            log::info!("No pending or active uploads, waiting...");
+            sleep(Duration::from_millis(5000)).await;
+        } else {
+            sleep(Duration::from_millis(100)).await;
         }
-        
-        sleep(Duration::from_millis(500)).await;
     }
     
+    log::info!("🚀 process_upload_queue completed");
     Ok(())
 }
 
@@ -1470,7 +1383,7 @@ mod tests {
             file_path: file_path_str.clone(),
             file_name: "test_video.mp4".to_string(),
             file_size: 18, // "test video content".len()
-            s3_key: s3_key.clone(),
+            s3_key,
             status: UploadStatus::Pending,
             progress: 0.0,
             uploaded_bytes: 0,
