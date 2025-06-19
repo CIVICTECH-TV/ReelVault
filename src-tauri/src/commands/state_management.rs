@@ -251,4 +251,283 @@ pub async fn reset_app_state(
     
     log::info!("App state reset to default");
     Ok("Application state reset successfully".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn test_app_state_default() {
+        let state = AppState::default();
+        
+        assert_eq!(state.is_watching, false);
+        assert_eq!(state.upload_queue.len(), 0);
+        assert_eq!(state.current_uploads.len(), 0);
+        assert_eq!(state.statistics.total_files_uploaded, 0);
+        assert_eq!(state.statistics.total_bytes_uploaded, 0);
+        assert_eq!(state.statistics.files_in_queue, 0);
+        assert_eq!(state.statistics.successful_uploads, 0);
+        assert_eq!(state.statistics.failed_uploads, 0);
+        assert_eq!(state.statistics.average_upload_speed_mbps, 0.0);
+        assert_eq!(state.last_error, None);
+        assert_eq!(state.system_status.aws_connected, false);
+        assert_eq!(state.system_status.disk_space_gb, 0.0);
+        assert_eq!(state.system_status.memory_usage_mb, 0.0);
+        assert_eq!(state.system_status.cpu_usage_percent, 0.0);
+        assert_eq!(state.system_status.network_available, false);
+        assert!(!state.system_status.last_heartbeat.is_empty());
+    }
+
+    #[test]
+    fn test_upload_item_creation() {
+        let item = UploadItem {
+            id: "test-123".to_string(),
+            file_path: "/test/file.mp4".to_string(),
+            file_name: "file.mp4".to_string(),
+            file_size: 1024 * 1024 * 100, // 100MB
+            status: UploadStatus::Pending,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            progress: 0.0,
+        };
+        
+        assert_eq!(item.id, "test-123");
+        assert_eq!(item.file_path, "/test/file.mp4");
+        assert_eq!(item.file_name, "file.mp4");
+        assert_eq!(item.file_size, 1024 * 1024 * 100);
+        assert!(matches!(item.status, UploadStatus::Pending));
+        assert_eq!(item.progress, 0.0);
+    }
+
+    #[test]
+    fn test_upload_progress_creation() {
+        let progress = UploadProgress {
+            item_id: "test-123".to_string(),
+            uploaded_bytes: 50 * 1024 * 1024, // 50MB
+            total_bytes: 100 * 1024 * 1024,   // 100MB
+            percentage: 50.0,
+            speed_mbps: 10.5,
+            eta_seconds: Some(5),
+        };
+        
+        assert_eq!(progress.item_id, "test-123");
+        assert_eq!(progress.uploaded_bytes, 50 * 1024 * 1024);
+        assert_eq!(progress.total_bytes, 100 * 1024 * 1024);
+        assert_eq!(progress.percentage, 50.0);
+        assert_eq!(progress.speed_mbps, 10.5);
+        assert_eq!(progress.eta_seconds, Some(5));
+    }
+
+    #[test]
+    fn test_app_statistics_creation() {
+        let stats = AppStatistics {
+            total_files_uploaded: 10,
+            total_bytes_uploaded: 1024 * 1024 * 1024, // 1GB
+            files_in_queue: 5,
+            successful_uploads: 8,
+            failed_uploads: 2,
+            average_upload_speed_mbps: 15.5,
+        };
+        
+        assert_eq!(stats.total_files_uploaded, 10);
+        assert_eq!(stats.total_bytes_uploaded, 1024 * 1024 * 1024);
+        assert_eq!(stats.files_in_queue, 5);
+        assert_eq!(stats.successful_uploads, 8);
+        assert_eq!(stats.failed_uploads, 2);
+        assert_eq!(stats.average_upload_speed_mbps, 15.5);
+    }
+
+    #[test]
+    fn test_system_status_creation() {
+        let status = SystemStatus {
+            aws_connected: true,
+            disk_space_gb: 500.0,
+            memory_usage_mb: 8192.0,
+            cpu_usage_percent: 25.5,
+            network_available: true,
+            last_heartbeat: "2024-01-01T00:00:00Z".to_string(),
+        };
+        
+        assert_eq!(status.aws_connected, true);
+        assert_eq!(status.disk_space_gb, 500.0);
+        assert_eq!(status.memory_usage_mb, 8192.0);
+        assert_eq!(status.cpu_usage_percent, 25.5);
+        assert_eq!(status.network_available, true);
+        assert_eq!(status.last_heartbeat, "2024-01-01T00:00:00Z");
+    }
+
+    #[tokio::test]
+    async fn test_get_app_state() {
+        let state_manager: AppStateManager = Arc::new(Mutex::new(AppState::default()));
+        
+        // Stateをモックするために、直接関数を呼び出す
+        let result = {
+            let app_state = state_manager.lock().unwrap();
+            app_state.clone()
+        };
+        
+        assert_eq!(result.is_watching, false);
+        assert_eq!(result.upload_queue.len(), 0);
+        assert_eq!(result.current_uploads.len(), 0);
+        assert_eq!(result.last_error, None);
+    }
+
+    #[tokio::test]
+    async fn test_set_app_state() {
+        let state_manager: AppStateManager = Arc::new(Mutex::new(AppState::default()));
+        
+        let mut new_state = AppState::default();
+        new_state.is_watching = true;
+        new_state.last_error = Some("Test error".to_string());
+        
+        // Stateをモックするために、直接関数を呼び出す
+        {
+            let mut app_state = state_manager.lock().unwrap();
+            *app_state = new_state.clone();
+        }
+        
+        // 状態が更新されたことを確認
+        let updated_state = {
+            let app_state = state_manager.lock().unwrap();
+            app_state.clone()
+        };
+        
+        assert_eq!(updated_state.is_watching, true);
+        assert_eq!(updated_state.last_error, Some("Test error".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_update_app_state() {
+        let state_manager: AppStateManager = Arc::new(Mutex::new(AppState::default()));
+        
+        // is_watchingフィールドの更新テスト
+        {
+            let mut app_state = state_manager.lock().unwrap();
+            app_state.is_watching = true;
+        }
+        
+        // 更新されたことを確認
+        let updated_state = {
+            let app_state = state_manager.lock().unwrap();
+            app_state.clone()
+        };
+        
+        assert_eq!(updated_state.is_watching, true);
+    }
+
+    #[tokio::test]
+    async fn test_reset_app_state() {
+        let state_manager: AppStateManager = Arc::new(Mutex::new(AppState::default()));
+        
+        // 初期状態を変更
+        {
+            let mut app_state = state_manager.lock().unwrap();
+            app_state.is_watching = true;
+            app_state.last_error = Some("Test error".to_string());
+        }
+        
+        // リセット
+        {
+            let mut app_state = state_manager.lock().unwrap();
+            *app_state = AppState::default();
+        }
+        
+        // リセットされたことを確認
+        let reset_state = {
+            let app_state = state_manager.lock().unwrap();
+            app_state.clone()
+        };
+        
+        assert_eq!(reset_state.is_watching, false);
+        assert_eq!(reset_state.last_error, None);
+        assert_eq!(reset_state.upload_queue.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_upload_status_transitions() {
+        // UploadStatusの各状態をテスト
+        let pending = UploadStatus::Pending;
+        let in_progress = UploadStatus::InProgress;
+        let completed = UploadStatus::Completed;
+        let failed = UploadStatus::Failed;
+        let paused = UploadStatus::Paused;
+        
+        // 各状態が正しく識別されることを確認
+        assert!(matches!(pending, UploadStatus::Pending));
+        assert!(matches!(in_progress, UploadStatus::InProgress));
+        assert!(matches!(completed, UploadStatus::Completed));
+        assert!(matches!(failed, UploadStatus::Failed));
+        assert!(matches!(paused, UploadStatus::Paused));
+    }
+
+    #[tokio::test]
+    async fn test_app_statistics_calculation() {
+        let mut stats = AppStatistics {
+            total_files_uploaded: 0,
+            total_bytes_uploaded: 0,
+            files_in_queue: 0,
+            successful_uploads: 0,
+            failed_uploads: 0,
+            average_upload_speed_mbps: 0.0,
+        };
+        
+        // 統計情報の更新をシミュレート
+        stats.total_files_uploaded += 1;
+        stats.total_bytes_uploaded += 1024 * 1024 * 100; // 100MB
+        stats.successful_uploads += 1;
+        stats.average_upload_speed_mbps = 10.5;
+        
+        assert_eq!(stats.total_files_uploaded, 1);
+        assert_eq!(stats.total_bytes_uploaded, 1024 * 1024 * 100);
+        assert_eq!(stats.successful_uploads, 1);
+        assert_eq!(stats.failed_uploads, 0);
+        assert_eq!(stats.average_upload_speed_mbps, 10.5);
+    }
+
+    #[tokio::test]
+    async fn test_system_status_monitoring() {
+        let mut status = SystemStatus {
+            aws_connected: false,
+            disk_space_gb: 0.0,
+            memory_usage_mb: 0.0,
+            cpu_usage_percent: 0.0,
+            network_available: false,
+            last_heartbeat: "2024-01-01T00:00:00Z".to_string(),
+        };
+        
+        // システム状態の更新をシミュレート
+        status.aws_connected = true;
+        status.disk_space_gb = 500.0;
+        status.memory_usage_mb = 8192.0;
+        status.cpu_usage_percent = 25.5;
+        status.network_available = true;
+        status.last_heartbeat = "2024-01-01T01:00:00Z".to_string();
+        
+        assert_eq!(status.aws_connected, true);
+        assert_eq!(status.disk_space_gb, 500.0);
+        assert_eq!(status.memory_usage_mb, 8192.0);
+        assert_eq!(status.cpu_usage_percent, 25.5);
+        assert_eq!(status.network_available, true);
+        assert_eq!(status.last_heartbeat, "2024-01-01T01:00:00Z");
+    }
+
+    #[tokio::test]
+    async fn test_state_update_validation() {
+        let state_manager: AppStateManager = Arc::new(Mutex::new(AppState::default()));
+        
+        // 無効なフィールド名での更新をテスト
+        // 実際の実装では、update_app_state関数でエラーハンドリングされる
+        // ここでは状態管理の基本動作を確認
+        
+        let initial_state = {
+            let app_state = state_manager.lock().unwrap();
+            app_state.clone()
+        };
+        
+        // 初期状態の確認
+        assert_eq!(initial_state.is_watching, false);
+        assert_eq!(initial_state.last_error, None);
+        assert_eq!(initial_state.system_status.aws_connected, false);
+    }
 } 

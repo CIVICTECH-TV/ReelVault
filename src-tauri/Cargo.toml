@@ -71,3 +71,4 @@ ffprobe = "0.4"         # 動画メタデータ抽出
 
 [dev-dependencies]
 tempfile = "3.8"        # テスト用一時ファイル
+mockall = "0.12"

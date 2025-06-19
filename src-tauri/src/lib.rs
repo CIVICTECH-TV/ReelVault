@@ -97,7 +97,6 @@ pub fn run() {
         get_sample_watch_configs,
         // AWS操作API
         test_aws_connection,
-        upload_file,
         list_s3_objects,
         restore_file,
         check_restore_status,
