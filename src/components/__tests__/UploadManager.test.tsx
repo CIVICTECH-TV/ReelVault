@@ -1,7 +1,10 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { UploadManager } from '../UploadManager';
+import { TauriCommands } from '../../services/tauriCommands';
+import { UploadStatus } from '../../types/tauri-commands';
 
 // Tauri APIのモック
 vi.mock('@tauri-apps/api/event', () => ({
@@ -23,19 +26,19 @@ vi.mock('../../services/tauriCommands', () => ({
     addFilesToUploadQueue: vi.fn(),
     startUpload: vi.fn(),
     stopUpload: vi.fn(),
+    retryUploadItem: vi.fn(),
+    removeUploadItem: vi.fn(),
+    startUploadProcessing: vi.fn(),
+    stopUploadProcessing: vi.fn(),
   },
   UploadStatus: {
-    Pending: 'pending',
-    InProgress: 'in_progress',
-    Completed: 'completed',
-    Failed: 'failed',
-    Cancelled: 'cancelled',
+    Pending: 'Pending',
+    InProgress: 'InProgress',
+    Completed: 'Completed',
+    Failed: 'Failed',
+    Cancelled: 'Cancelled',
   },
 }));
-
-import { UploadManager } from '../UploadManager';
-
-// 既存のTauri APIのグローバルモックは不要になったので削除
 
 // UploadServiceのモック（必要なら残す）
 vi.mock('../../services/uploadService', () => ({
@@ -46,8 +49,6 @@ vi.mock('../../services/uploadService', () => ({
   })),
 }));
 
-import { TauriCommands } from '../../services/tauriCommands';
-
 const dummyAwsCredentials = {
   access_key_id: 'dummy-access-key',
   secret_access_key: 'dummy-secret-key',
@@ -57,18 +58,13 @@ const dummyBucketName = 'dummy-bucket';
 
 describe('UploadManager', () => {
   beforeEach(() => {
-    // すべてのTauriCommandsのモックをクリア
-    Object.values(TauriCommands).forEach(fn => {
-      if (typeof fn === 'function' && 'mockClear' in fn) {
-        (fn as any).mockClear();
-      }
-    });
-
-    // デフォルトのモック戻り値を設定
-    vi.mocked(TauriCommands.initializeUploadQueue).mockResolvedValue(undefined);
-    vi.mocked(TauriCommands.clearUploadQueue).mockResolvedValue(undefined);
-    vi.mocked(TauriCommands.getUploadQueueItems).mockResolvedValue([]);
-    vi.mocked(TauriCommands.getUploadQueueStatus).mockResolvedValue({
+    vi.clearAllMocks();
+    
+    // 共通の初期化モック設定
+    vi.mocked(TauriCommands.initializeUploadQueue).mockImplementation(() => Promise.resolve());
+    vi.mocked(TauriCommands.addFilesToUploadQueue).mockImplementation(() => Promise.resolve());
+    vi.mocked(TauriCommands.getUploadQueueItems).mockImplementation(() => Promise.resolve([]));
+    vi.mocked(TauriCommands.getUploadQueueStatus).mockImplementation(() => Promise.resolve({
       total_files: 0,
       completed_files: 0,
       failed_files: 0,
@@ -76,9 +72,12 @@ describe('UploadManager', () => {
       in_progress_files: 0,
       total_bytes: 0,
       uploaded_bytes: 0,
-      average_speed_mbps: 0,
-      estimated_time_remaining: 0
-    });
+      average_speed_mbps: 0
+    }));
+    vi.mocked(TauriCommands.startUploadProcessing).mockImplementation(() => Promise.resolve());
+    vi.mocked(TauriCommands.removeUploadItem).mockImplementation(() => Promise.resolve());
+    vi.mocked(TauriCommands.retryUploadItem).mockImplementation(() => Promise.resolve());
+    vi.mocked(TauriCommands.clearUploadQueue).mockImplementation(() => Promise.resolve());
   });
 
   it('should render upload manager component', () => {
@@ -180,7 +179,7 @@ describe('UploadManager', () => {
         file_name: 'file1.txt',
         file_size: 512 * 1024,
         s3_key: 'uploads/file1.txt',
-        status: 'Pending' as any,
+        status: UploadStatus.Pending,
         progress: 0,
         uploaded_bytes: 0,
         speed_mbps: 0,
@@ -193,7 +192,7 @@ describe('UploadManager', () => {
         file_name: 'file2.txt',
         file_size: 512 * 1024,
         s3_key: 'uploads/file2.txt',
-        status: 'Pending' as any,
+        status: UploadStatus.Pending,
         progress: 0,
         uploaded_bytes: 0,
         speed_mbps: 0,
@@ -337,6 +336,543 @@ describe('UploadManager', () => {
     // ファイルサイズ制限エラーが表示されることを確認
     await waitFor(() => {
       expect(screen.getByText(/制限.*超えています/)).toBeInTheDocument();
+    });
+  });
+
+  // ===== アップロードキュー管理テスト =====
+  it('should display upload queue items correctly', async () => {
+    const mockFileSelection = {
+      selected_files: ['/path/to/file1.txt'],
+      total_size: 1024,
+      file_count: 1
+    };
+
+    const mockQueueItems = [
+      { 
+        id: '1', 
+        file_path: '/path/to/file1.txt',
+        file_name: 'file1.txt',
+        file_size: 1024 * 1024,
+        s3_key: 'uploads/file1.txt',
+        status: UploadStatus.Pending,
+        progress: 0,
+        uploaded_bytes: 0,
+        speed_mbps: 0,
+        created_at: new Date().toISOString(),
+        retry_count: 0
+      }
+    ];
+
+    vi.mocked(TauriCommands.openFileDialog).mockResolvedValue(mockFileSelection);
+    vi.mocked(TauriCommands.getUploadQueueItems).mockResolvedValue(mockQueueItems);
+
+    render(<UploadManager awsCredentials={dummyAwsCredentials} bucketName={dummyBucketName} />);
+
+    // 初期化完了を待つ
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('設定済み')).toBeInTheDocument();
+    });
+
+    // ファイル選択ボタンをクリック
+    fireEvent.click(screen.getByText(/📁 ファイル選択/));
+
+    // アップロード開始ボタンをクリック
+    await waitFor(() => {
+      expect(screen.getByText('🚀 アップロード開始')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('🚀 アップロード開始'));
+
+    // キューアイテムが表示されることを確認
+    await waitFor(() => {
+      expect(screen.getByText('file1.txt')).toBeInTheDocument();
+    });
+  });
+
+  it('should handle upload queue retry functionality', async () => {
+    // ファイル選択のモック
+    const mockFileSelection = {
+      selected_files: ['/path/to/file1.txt'],
+      total_size: 1024,
+      file_count: 1
+    };
+    vi.mocked(TauriCommands.openFileDialog).mockResolvedValue(mockFileSelection);
+
+    // 初期化時は空のキュー
+    vi.mocked(TauriCommands.getUploadQueueItems).mockResolvedValue([]);
+
+    render(<UploadManager awsCredentials={dummyAwsCredentials} bucketName={dummyBucketName} />);
+
+    // 初期化完了を待つ
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('設定済み')).toBeInTheDocument();
+    });
+
+    // ファイル選択ボタンをクリック
+    fireEvent.click(screen.getByText(/📁 ファイル選択/));
+
+    // アップロード開始ボタンをクリック
+    await waitFor(() => {
+      expect(screen.getByText('🚀 アップロード開始')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('🚀 アップロード開始'));
+
+    // ここで失敗状態のキューに切り替える
+    const mockQueueItems = [
+      { 
+        id: '1', 
+        file_path: '/path/to/file1.txt',
+        file_name: 'file1.txt',
+        file_size: 1024 * 1024,
+        s3_key: 'uploads/file1.txt',
+        status: 'Failed' as UploadStatus,
+        progress: 0,
+        uploaded_bytes: 0,
+        speed_mbps: 0,
+        created_at: new Date().toISOString(),
+        retry_count: 1,
+        error_message: 'Network error'
+      }
+    ];
+    vi.mocked(TauriCommands.getUploadQueueItems).mockResolvedValue(mockQueueItems);
+
+    // デバッグ: status値とUploadStatus.Failedの値を出力
+    console.log('mockQueueItems:', mockQueueItems);
+    console.log('UploadStatus.Failed:', UploadStatus.Failed);
+
+    // 強制的に再取得させるため、再度ファイル選択ボタンを押す
+    fireEvent.click(screen.getByText(/📁 ファイル選択/));
+
+    // デバッグ: UIツリーを出力
+    screen.debug();
+
+    // 失敗したアイテムが表示されることを確認
+    await waitFor(() => {
+      expect(screen.getByText('❌ 失敗')).toBeInTheDocument();
+      expect(screen.getByText('🔄 再試行')).toBeInTheDocument();
+    });
+  });
+
+  it('should handle upload queue item removal', async () => {
+    // モックの設定
+    const mockFileSelection = {
+      selected_files: ['/path/to/file1.txt', '/path/to/file2.txt'],
+      total_size: 3072,
+      file_count: 2
+    };
+
+    vi.mocked(TauriCommands.openFileDialog).mockResolvedValue(mockFileSelection);
+    vi.mocked(TauriCommands.initializeUploadQueue).mockImplementation(() => Promise.resolve());
+    vi.mocked(TauriCommands.addFilesToUploadQueue).mockImplementation(() => Promise.resolve());
+    vi.mocked(TauriCommands.getUploadQueueItems).mockImplementation(() => Promise.resolve([
+      { 
+        id: '1', 
+        file_name: 'file1.txt', 
+        file_path: '/path/to/file1.txt',
+        file_size: 1024, 
+        uploaded_bytes: 0, 
+        progress: 0, 
+        status: UploadStatus.Pending,
+        s3_key: 'uploads/file1.txt',
+        speed_mbps: 0,
+        created_at: new Date().toISOString(),
+        retry_count: 0
+      },
+      { 
+        id: '2', 
+        file_name: 'file2.txt', 
+        file_path: '/path/to/file2.txt',
+        file_size: 2048, 
+        uploaded_bytes: 0, 
+        progress: 0, 
+        status: UploadStatus.Pending,
+        s3_key: 'uploads/file2.txt',
+        speed_mbps: 0,
+        created_at: new Date().toISOString(),
+        retry_count: 0
+      }
+    ]));
+    vi.mocked(TauriCommands.getUploadQueueStatus).mockImplementation(() => Promise.resolve({
+      total_files: 2,
+      completed_files: 0,
+      failed_files: 0,
+      pending_files: 2,
+      in_progress_files: 0,
+      total_bytes: 3072,
+      uploaded_bytes: 0,
+      average_speed_mbps: 0
+    }));
+    vi.mocked(TauriCommands.startUploadProcessing).mockImplementation(() => Promise.resolve());
+    vi.mocked(TauriCommands.removeUploadItem).mockImplementation(() => Promise.resolve());
+
+    render(<UploadManager awsCredentials={dummyAwsCredentials} bucketName={dummyBucketName} />);
+
+    // 初期化完了を待つ
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('設定済み')).toBeInTheDocument();
+    });
+
+    // ファイル選択ボタンをクリック
+    fireEvent.click(screen.getByText(/📁 ファイル選択/));
+    
+    // クリック直後のUIを出力
+    console.log('=== ファイル選択ボタンクリック直後のUI ===');
+    screen.debug();
+    
+    // モックの呼び出しを確認
+    console.log('=== モック呼び出し確認 ===');
+    console.log('openFileDialog called:', vi.mocked(TauriCommands.openFileDialog).mock.calls);
+    console.log('addFilesToUploadQueue called:', vi.mocked(TauriCommands.addFilesToUploadQueue).mock.calls);
+    console.log('getUploadQueueItems called:', vi.mocked(TauriCommands.getUploadQueueItems).mock.calls);
+
+    // アップロード開始ボタンをクリックしてキューに追加
+    await waitFor(() => {
+      expect(screen.getByText('🚀 アップロード開始')).toBeInTheDocument();
+    });
+    
+    fireEvent.click(screen.getByText('🚀 アップロード開始'));
+    
+    console.log('=== アップロード開始ボタンクリック後のモック呼び出し確認 ===');
+    console.log('addFilesToUploadQueue called:', vi.mocked(TauriCommands.addFilesToUploadQueue).mock.calls);
+    console.log('getUploadQueueItems called:', vi.mocked(TauriCommands.getUploadQueueItems).mock.calls);
+
+    // キューアイテムが表示されることを確認
+    await waitFor(() => {
+      console.log('=== waitFor内のUI ===');
+      screen.debug();
+      expect(screen.getByText('file1.txt')).toBeInTheDocument();
+    });
+  });
+
+  // ===== アップロード制御テスト =====
+  it('should handle start upload processing', async () => {
+    // ファイル選択のモックを設定
+    const mockFileSelection = {
+      selected_files: ['/path/to/test1.txt', '/path/to/test2.txt'],
+      total_size: 3072,
+      file_count: 2
+    };
+    
+    vi.mocked(TauriCommands.openFileDialog).mockResolvedValue(mockFileSelection);
+    vi.mocked(TauriCommands.addFilesToUploadQueue).mockImplementation(() => Promise.resolve());
+    vi.mocked(TauriCommands.getUploadQueueItems).mockImplementation(() => Promise.resolve([
+      { 
+        id: '1', 
+        file_name: 'test1.txt', 
+        file_path: '/path/to/test1.txt',
+        file_size: 1024, 
+        uploaded_bytes: 0, 
+        progress: 0, 
+        status: UploadStatus.Pending,
+        s3_key: 'uploads/test1.txt',
+        speed_mbps: 0,
+        created_at: new Date().toISOString(),
+        retry_count: 0
+      },
+      { 
+        id: '2', 
+        file_name: 'test2.txt', 
+        file_path: '/path/to/test2.txt',
+        file_size: 2048, 
+        uploaded_bytes: 0, 
+        progress: 0, 
+        status: UploadStatus.Pending,
+        s3_key: 'uploads/test2.txt',
+        speed_mbps: 0,
+        created_at: new Date().toISOString(),
+        retry_count: 0
+      }
+    ]));
+    vi.mocked(TauriCommands.getUploadQueueStatus).mockImplementation(() => Promise.resolve({
+      total_files: 2,
+      completed_files: 0,
+      failed_files: 0,
+      pending_files: 2,
+      in_progress_files: 0,
+      total_bytes: 3072,
+      uploaded_bytes: 0,
+      average_speed_mbps: 0
+    }));
+    vi.mocked(TauriCommands.startUploadProcessing).mockImplementation(() => Promise.resolve());
+    
+    render(<UploadManager awsCredentials={dummyAwsCredentials} bucketName={dummyBucketName} />);
+
+    // 初期化完了を待つ
+    await waitFor(() => {
+      expect(TauriCommands.initializeUploadQueue).toHaveBeenCalled();
+    });
+
+    // ファイル選択ボタンをクリック（actでラップ）
+    await act(async () => {
+      fireEvent.click(screen.getByText(/📁 ファイル選択/));
+    });
+
+    // クリック直後のUIツリーを出力
+    // これでselectedFilesの反映状況を確認
+    // 必要ならconsole.log(screen.debug());
+    screen.debug();
+
+    // ファイル選択処理が呼ばれることを確認
+    await waitFor(() => {
+      expect(TauriCommands.openFileDialog).toHaveBeenCalled();
+    });
+
+    // ファイル選択後の状態を待つ（selectedFilesが設定される）
+    // アップロードコントロールボタンが表示されるまで待つ
+    await waitFor(() => {
+      expect(screen.queryByText(/🚀 アップロード開始/)).toBeInTheDocument();
+    }, { timeout: 10000 });
+
+    // アップロード開始ボタンをクリック
+    const startButton = screen.getByText(/🚀 アップロード開始/);
+    fireEvent.click(startButton);
+
+    // キュー追加とアップロード開始が呼ばれることを確認
+    await waitFor(() => {
+      expect(TauriCommands.addFilesToUploadQueue).toHaveBeenCalled();
+      expect(TauriCommands.startUploadProcessing).toHaveBeenCalled();
+    });
+  });
+
+  it('should handle stop upload processing', async () => {
+    // ファイル選択のモックを設定
+    const mockFileSelection = {
+      selected_files: ['/path/to/test1.txt', '/path/to/test2.txt'],
+      total_size: 3072,
+      file_count: 2
+    };
+    
+    vi.mocked(TauriCommands.openFileDialog).mockResolvedValue(mockFileSelection);
+    vi.mocked(TauriCommands.addFilesToUploadQueue).mockResolvedValue(undefined);
+    vi.mocked(TauriCommands.getUploadQueueItems).mockResolvedValue([
+      { 
+        id: '1', 
+        file_name: 'test1.txt', 
+        file_path: '/path/to/test1.txt',
+        file_size: 1024, 
+        uploaded_bytes: 0, 
+        progress: 0, 
+        status: UploadStatus.Pending,
+        s3_key: 'uploads/test1.txt',
+        speed_mbps: 0,
+        created_at: new Date().toISOString(),
+        retry_count: 0
+      },
+      { 
+        id: '2', 
+        file_name: 'test2.txt', 
+        file_path: '/path/to/test2.txt',
+        file_size: 2048, 
+        uploaded_bytes: 0, 
+        progress: 0, 
+        status: UploadStatus.Pending,
+        s3_key: 'uploads/test2.txt',
+        speed_mbps: 0,
+        created_at: new Date().toISOString(),
+        retry_count: 0
+      }
+    ]);
+    vi.mocked(TauriCommands.getUploadQueueStatus).mockResolvedValue({
+      total_files: 2,
+      completed_files: 0,
+      failed_files: 0,
+      pending_files: 2,
+      in_progress_files: 0,
+      total_bytes: 3072,
+      uploaded_bytes: 0,
+      average_speed_mbps: 0
+    });
+    vi.mocked(TauriCommands.startUploadProcessing).mockResolvedValue(undefined);
+    vi.mocked(TauriCommands.stopUploadProcessing).mockResolvedValue(undefined);
+    
+    render(<UploadManager awsCredentials={dummyAwsCredentials} bucketName={dummyBucketName} />);
+
+    // 初期化完了を待つ
+    await waitFor(() => {
+      expect(TauriCommands.initializeUploadQueue).toHaveBeenCalled();
+    });
+
+    // ファイル選択ボタンをクリック
+    fireEvent.click(screen.getByText(/📁 ファイル選択/));
+    
+    // ファイル選択後の状態を待つ
+    await waitFor(() => {
+      expect(screen.queryByText(/🚀 アップロード開始/)).toBeInTheDocument();
+    }, { timeout: 3000 });
+
+    // アップロード開始
+    const startButton = screen.getByText(/🚀 アップロード開始/);
+    fireEvent.click(startButton);
+
+    // アップロード中の状態を待つ
+    await waitFor(() => {
+      expect(screen.queryByText(/⏸️ 停止/)).toBeInTheDocument();
+    }, { timeout: 3000 });
+
+    // アップロード停止ボタンをクリック
+    const stopButton = screen.getByText(/⏸️ 停止/);
+    fireEvent.click(stopButton);
+
+    // アップロード停止が呼ばれることを確認
+    expect(TauriCommands.stopUploadProcessing).toHaveBeenCalled();
+  });
+
+  it('should handle clear upload queue', async () => {
+    // ファイル選択のモックを設定
+    const mockFileSelection = {
+      selected_files: ['/path/to/test1.txt', '/path/to/test2.txt'],
+      total_size: 3072,
+      file_count: 2
+    };
+    
+    vi.mocked(TauriCommands.openFileDialog).mockResolvedValue(mockFileSelection);
+    
+    render(<UploadManager awsCredentials={dummyAwsCredentials} bucketName={dummyBucketName} />);
+
+    // 初期化完了を待つ
+    await waitFor(() => {
+      expect(TauriCommands.initializeUploadQueue).toHaveBeenCalled();
+    });
+
+    // ファイル選択ボタンをクリック
+    fireEvent.click(screen.getByText(/📁 ファイル選択/));
+    
+    // ファイル選択後の状態を待つ
+    await waitFor(() => {
+      expect(screen.queryByText(/🗑️ キューをクリア/)).toBeInTheDocument();
+    }, { timeout: 3000 });
+
+    // キュークリアボタンをクリック
+    const clearButton = screen.getByText(/🗑️ キューをクリア/);
+    fireEvent.click(clearButton);
+
+    // キュークリアが呼ばれることを確認
+    expect(TauriCommands.clearUploadQueue).toHaveBeenCalled();
+  });
+
+  // ===== 設定管理テスト =====
+  it('should handle upload configuration changes', async () => {
+    render(<UploadManager awsCredentials={dummyAwsCredentials} bucketName={dummyBucketName} />);
+    await waitFor(() => {
+      expect(TauriCommands.initializeUploadQueue).toHaveBeenCalled();
+    });
+    fireEvent.click(screen.getByText(/⚙️ 設定/));
+    // input[type=number]を全て取得し、順序で特定
+    const numberInputs = screen.getAllByRole('spinbutton');
+    // 0: 同時アップロード数, 1: チャンク並列数, ...
+    fireEvent.change(numberInputs[0], { target: { value: '5' } });
+    fireEvent.change(numberInputs[1], { target: { value: '6' } });
+    expect(numberInputs[0]).toHaveValue(5);
+    expect(numberInputs[1]).toHaveValue(6);
+  });
+
+  // ===== 進捗表示テスト =====
+  it('should display upload progress correctly', async () => {
+    const mockFileSelection = {
+      selected_files: ['/path/to/file1.txt'],
+      total_size: 1024,
+      file_count: 1
+    };
+
+    const mockQueueItems = [
+      { 
+        id: '1', 
+        file_name: 'file1.txt', 
+        file_path: '/path/to/file1.txt',
+        file_size: 1024, 
+        uploaded_bytes: 768, 
+        progress: 75, 
+        status: UploadStatus.InProgress,
+        s3_key: 'uploads/file1.txt',
+        speed_mbps: 1.5,
+        created_at: new Date().toISOString(),
+        retry_count: 0
+      }
+    ];
+
+    vi.mocked(TauriCommands.openFileDialog).mockResolvedValue(mockFileSelection);
+    vi.mocked(TauriCommands.getUploadQueueItems).mockImplementation(() => Promise.resolve(mockQueueItems));
+
+    render(<UploadManager awsCredentials={dummyAwsCredentials} bucketName={dummyBucketName} />);
+
+    // 初期化完了を待つ
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('設定済み')).toBeInTheDocument();
+    });
+
+    // ファイル選択ボタンをクリック
+    fireEvent.click(screen.getByText(/📁 ファイル選択/));
+
+    // アップロード開始ボタンをクリック
+    await waitFor(() => {
+      expect(screen.getByText('🚀 アップロード開始')).toBeInTheDocument();
+    });
+    
+    fireEvent.click(screen.getByText('🚀 アップロード開始'));
+
+    // file1.txtが現れるまでしつこく待つ
+    await waitFor(() => {
+      expect(screen.queryByText(/file1\.txt/)).toBeInTheDocument();
+      expect(screen.queryByText('75.0%')).toBeInTheDocument();
+    }, { timeout: 3000 });
+  });
+
+  // ===== エラーハンドリングテスト =====
+  it('should handle add files to queue error', async () => {
+    const mockFileSelection = {
+      selected_files: ['/path/to/file1.txt'],
+      total_size: 1024,
+      file_count: 1
+    };
+
+    vi.mocked(TauriCommands.openFileDialog).mockResolvedValue(mockFileSelection);
+    vi.mocked(TauriCommands.addFilesToUploadQueue).mockRejectedValue(new Error('キュー追加失敗'));
+
+    render(<UploadManager awsCredentials={dummyAwsCredentials} bucketName={dummyBucketName} />);
+
+    // 初期化完了を待つ
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('設定済み')).toBeInTheDocument();
+    });
+
+    // ファイル選択ボタンをクリック
+    fireEvent.click(screen.getByText(/📁 ファイル選択/));
+
+    // アップロード開始ボタンをクリック
+    await waitFor(() => {
+      expect(screen.getByText('🚀 アップロード開始')).toBeInTheDocument();
+    });
+    
+    fireEvent.click(screen.getByText('🚀 アップロード開始'));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/キュー追加失敗/)).toBeInTheDocument();
+    }, { timeout: 3000 });
+  });
+
+  // ===== 統計情報表示テスト =====
+  it('should display upload statistics correctly', async () => {
+    vi.mocked(TauriCommands.openFileDialog).mockResolvedValue({ 
+      selected_files: ['/path/to/file1.txt'], 
+      total_size: 1024, 
+      file_count: 1 
+    });
+    vi.mocked(TauriCommands.addFilesToUploadQueue).mockResolvedValue(undefined);
+    
+    render(<UploadManager awsCredentials={dummyAwsCredentials} bucketName={dummyBucketName} />);
+    
+    // 初期化完了を待つ
+    await waitFor(() => {
+      expect(TauriCommands.initializeUploadQueue).toHaveBeenCalled();
+    });
+
+    // ファイル選択
+    const fileButton = screen.getByText(/📁 ファイル選択/);
+    fireEvent.click(fileButton);
+
+    // 選択ファイル情報が表示されることを確認
+    await waitFor(() => {
+      expect(screen.getByText(/1個のファイル/)).toBeInTheDocument();
+      expect(screen.getByText(/合計サイズ: 1 KB/)).toBeInTheDocument();
     });
   });
 }); 

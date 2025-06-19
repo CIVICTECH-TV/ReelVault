@@ -2,7 +2,7 @@
 import React, { useState, useEffect, forwardRef, useImperativeHandle, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-shell';
-import { TauriCommands, AppConfig, AwsCredentials, AwsConfig, AppState, SystemStatus, RestoreInfo, RestoreNotification, LifecyclePolicyStatus, LifecycleRule, S3Object, RestoreStatusResult } from '../services/tauriCommands';
+import { TauriCommands, AppConfig, AwsCredentials, AwsConfig, AppState, SystemStatus, RestoreInfo, RestoreNotification, LifecyclePolicyStatus, LifecycleRule, S3Object, RestoreStatusResult, ConfigValidationResult, AwsAuthResult, PermissionCheck } from '../services/tauriCommands';
 import { AWS_REGIONS, DEFAULT_REGION } from '../constants/aws-regions';
 // RestoreManagerは直接統合済み
 import { UploadManager } from './UploadManager';
@@ -729,9 +729,15 @@ export const ConfigManager = forwardRef<ConfigManagerRef, ConfigManagerProps>(({
       const status = await TauriCommands.getLifecycleStatus(awsConfig);
       console.log('Lifecycle status received:', status);
       setLifecycleStatus(status);
+      // エラーをクリア
+      setError(null);
     } catch (err) {
       console.error('Error checking lifecycle status:', err);
-      console.error('ライフサイクル状況の取得に失敗しました:', err instanceof Error ? err.message : 'Unknown error');
+      const errorMessage = 'ライフサイクル状況の取得に失敗しました';
+      console.error(errorMessage, err instanceof Error ? err.message : 'Unknown error');
+      // エラーメッセージをUIに表示
+      setError(errorMessage);
+      setLifecycleStatus(null);
     } finally {
       setIsLifecycleLoading(false);
     }

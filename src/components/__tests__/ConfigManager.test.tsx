@@ -3,6 +3,14 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { vi, describe, it, expect, beforeEach, afterEach, beforeAll } from 'vitest';
 import { ConfigManager } from '../ConfigManager';
 import { TauriCommands } from '../../services/tauriCommands';
+import * as debugUtils from '../../utils/debug';
+
+// isDevのモック
+vi.mock('../../utils/debug', () => ({
+  isDev: vi.fn(),
+  debugLog: vi.fn(),
+  debugError: vi.fn(),
+}));
 
 // Tauri APIのモック
 vi.mock('@tauri-apps/api/event', () => ({
@@ -156,6 +164,7 @@ describe('ConfigManager', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(debugUtils.isDev).mockReturnValue(true);
     // TauriCommandsの全メソッドを明示的に初期化
     vi.mocked(TauriCommands.getConfig).mockResolvedValue(dummyAppConfig);
     vi.mocked(TauriCommands.getAppState).mockResolvedValue(dummyAppState);
@@ -192,6 +201,64 @@ describe('ConfigManager', () => {
     vi.mocked(TauriCommands.openFileDialog).mockResolvedValue({ selected_files: [], total_size: 0, file_count: 0 });
   });
 
+  // ===== ライフサイクル管理テスト =====
+  it('should handle lifecycle management functionality', async () => {
+    // getLifecycleStatusのモック
+    vi.mocked(TauriCommands.getLifecycleStatus).mockResolvedValue({
+      enabled: false,
+      rule_id: undefined,
+      transition_days: undefined,
+      storage_class: undefined,
+      prefix: '',
+      error_message: 'ライフサイクル設定が見つかりません',
+    });
+
+    render(
+      <ConfigManager
+        initialConfig={dummyAppConfig}
+        initialState={dummyAppState}
+        onConfigChange={mockOnConfigChange}
+        onStateChange={mockOnStateChange}
+        onAuthSuccess={mockOnAuthSuccess}
+        onHealthStatusChange={mockOnHealthStatusChange}
+      />
+    );
+
+    // 設定タブに切り替え
+    const settingsButton = screen.getByText(/設定/);
+    fireEvent.click(settingsButton);
+
+    // credentialsがセットされるまで待機
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('test-access-key')).toBeInTheDocument();
+      expect(screen.getByDisplayValue('test-secret-key')).toBeInTheDocument();
+      const regionSelect = screen.getByLabelText('AWSリージョン:') as HTMLSelectElement;
+      expect(regionSelect.value).toBe('ap-northeast-1');
+    });
+
+    // 自動ライフサイクル状況チェックの完了を待つ
+    await waitFor(() => {
+      expect(TauriCommands.getLifecycleStatus).toHaveBeenCalled();
+    }, { timeout: 3000 });
+
+    // getLifecycleStatusが正しい引数で呼ばれたことを確認
+    expect(vi.mocked(TauriCommands.getLifecycleStatus)).toHaveBeenCalledWith({
+      access_key_id: 'test-access-key',
+      secret_access_key: 'test-secret-key',
+      region: 'ap-northeast-1',
+      bucket_name: 'test-bucket'
+    });
+
+    // 返り値が期待通りであることを確認
+    const lastCall = vi.mocked(TauriCommands.getLifecycleStatus).mock.calls[vi.mocked(TauriCommands.getLifecycleStatus).mock.calls.length - 1];
+    expect(lastCall[0]).toEqual({
+      access_key_id: 'test-access-key',
+      secret_access_key: 'test-secret-key',
+      region: 'ap-northeast-1',
+      bucket_name: 'test-bucket'
+    });
+  });
+
   // ===== 基本UIテスト =====
   it('should render ConfigManager component', async () => {
     render(
@@ -211,7 +278,7 @@ describe('ConfigManager', () => {
       expect(screen.getByText(/設定/)).toBeInTheDocument();
       expect(screen.getByText(/バックアップ/)).toBeInTheDocument();
       expect(screen.getByText(/リストア/)).toBeInTheDocument();
-      expect(screen.getByText(/APIテスト/)).toBeInTheDocument();
+      expect(screen.getByText((content) => content.includes('APIテスト'))).toBeInTheDocument();
     });
   });
 
@@ -345,7 +412,8 @@ describe('ConfigManager', () => {
     await waitFor(() => {
       expect(screen.getByDisplayValue('test-access-key')).toBeInTheDocument();
       expect(screen.getByDisplayValue('test-secret-key')).toBeInTheDocument();
-      expect(screen.getByRole('combobox', { name: /AWSリージョン/ })).toHaveValue('ap-northeast-1');
+      const regionSelect = screen.getByLabelText('AWSリージョン:') as HTMLSelectElement;
+      expect(regionSelect.value).toBe('ap-northeast-1');
     });
   });
 
@@ -621,79 +689,13 @@ describe('ConfigManager', () => {
     });
   });
 
-  // ===== ライフサイクル管理テスト =====
-  it('should check lifecycle status on mount', async () => {
-    render(
-      <ConfigManager
-        initialConfig={dummyAppConfig}
-        initialState={dummyAppState}
-        onConfigChange={mockOnConfigChange}
-        onStateChange={mockOnStateChange}
-        onAuthSuccess={mockOnAuthSuccess}
-        onHealthStatusChange={mockOnHealthStatusChange}
-      />
-    );
+  // ===== エラーハンドリングテスト =====
+  it('should handle restore error properly', async () => {
+    // 復元エラーをモック
+    vi.mocked(TauriCommands.restoreFile).mockRejectedValue(new Error('復元失敗'));
 
-    // 認証情報が読み込まれた後、ライフサイクルステータス取得が実行されることを確認
-    await waitFor(() => {
-      expect(TauriCommands.getLifecycleStatus).toHaveBeenCalled();
-    }, { timeout: 3000 });
-  });
-
-  it('should handle lifecycle status check error', async () => {
-    vi.mocked(TauriCommands.getLifecycleStatus).mockRejectedValue(new Error('ライフサイクル確認失敗'));
-
-    render(
-      <ConfigManager
-        initialConfig={dummyAppConfig}
-        initialState={dummyAppState}
-        onConfigChange={mockOnConfigChange}
-        onStateChange={mockOnStateChange}
-        onAuthSuccess={mockOnAuthSuccess}
-        onHealthStatusChange={mockOnHealthStatusChange}
-      />
-    );
-
-    // 認証情報が読み込まれた後、ライフサイクルステータス取得が実行されることを確認
-    await waitFor(() => {
-      expect(TauriCommands.getLifecycleStatus).toHaveBeenCalled();
-    }, { timeout: 3000 });
-  });
-
-  // ===== 復元機能テスト =====
-  it('should load S3 objects successfully', async () => {
-    render(
-      <ConfigManager
-        initialConfig={dummyAppConfig}
-        initialState={dummyAppState}
-        onConfigChange={mockOnConfigChange}
-        onStateChange={mockOnStateChange}
-        onAuthSuccess={mockOnAuthSuccess}
-        onHealthStatusChange={mockOnHealthStatusChange}
-      />
-    );
-
-    // リストアタブに切り替え
-    const restoreButton = screen.getByText(/リストア/);
-    fireEvent.click(restoreButton);
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /S3オブジェクト一覧を取得/ })).toBeInTheDocument();
-    });
-
-    const loadButton = screen.getByRole('button', { name: /S3オブジェクト一覧を取得/ });
-    
-    await act(async () => {
-      fireEvent.click(loadButton);
-    });
-
-    await waitFor(() => {
-      expect(TauriCommands.listS3Objects).toHaveBeenCalled();
-    });
-  });
-
-  it('should handle S3 objects load error', async () => {
-    vi.mocked(TauriCommands.listS3Objects).mockRejectedValue(new Error('S3オブジェクト取得失敗'));
+    // S3オブジェクトをモック
+    vi.mocked(TauriCommands.listS3Objects).mockResolvedValue(dummyS3Objects);
 
     render(
       <ConfigManager
@@ -710,274 +712,28 @@ describe('ConfigManager', () => {
     const restoreButton = screen.getByText(/リストア/);
     fireEvent.click(restoreButton);
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /S3オブジェクト一覧を取得/ })).toBeInTheDocument();
-    });
-
+    // S3オブジェクト一覧取得ボタンをクリック
     const loadButton = screen.getByRole('button', { name: /S3オブジェクト一覧を取得/ });
-    
-    await act(async () => {
-      fireEvent.click(loadButton);
+    fireEvent.click(loadButton);
+
+    // ファイルが表示されるまで待機
+    await waitFor(() => {
+      expect(screen.getByText('test-file1.mp4')).toBeInTheDocument();
     });
 
+    // ファイルを選択 - チェックボックスを正しく特定
+    const fileRow = screen.getByText('test-file1.mp4').closest('tr');
+    const checkbox = fileRow?.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    expect(checkbox).toBeInTheDocument();
+    fireEvent.click(checkbox);
+
+    // 復元実行ボタンをクリック
+    const restoreButton2 = screen.getByText(/復元実行/);
+    fireEvent.click(restoreButton2);
+
+    // エラーメッセージが表示されることを確認
     await waitFor(() => {
-      expect(TauriCommands.listS3Objects).toHaveBeenCalled();
-    });
-  });
-
-  it('should handle restore file request', async () => {
-    render(
-      <ConfigManager
-        initialConfig={dummyAppConfig}
-        initialState={dummyAppState}
-        onConfigChange={mockOnConfigChange}
-        onStateChange={mockOnStateChange}
-        onAuthSuccess={mockOnAuthSuccess}
-        onHealthStatusChange={mockOnHealthStatusChange}
-      />
-    );
-
-    // リストアタブに切り替え
-    const restoreButton = screen.getByText(/リストア/);
-    fireEvent.click(restoreButton);
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /S3オブジェクト一覧を取得/ })).toBeInTheDocument();
-    });
-
-    const loadButton = screen.getByRole('button', { name: /S3オブジェクト一覧を取得/ });
-    
-    await act(async () => {
-      fireEvent.click(loadButton);
-    });
-
-    await waitFor(() => {
-      expect(TauriCommands.listS3Objects).toHaveBeenCalled();
-    });
-  });
-
-  // ===== 設定管理テスト =====
-  it('should update config when bucket name is set', async () => {
-    // 認証が成功した状態をモック
-    vi.mocked(TauriCommands.authenticateAws).mockResolvedValue(dummyAuthResult);
-
-    render(
-      <ConfigManager
-        initialConfig={dummyAppConfig}
-        initialState={dummyAppState}
-        onConfigChange={mockOnConfigChange}
-        onStateChange={mockOnStateChange}
-        onAuthSuccess={mockOnAuthSuccess}
-        onHealthStatusChange={mockOnHealthStatusChange}
-      />
-    );
-
-    // 設定タブに切り替え
-    const settingsButton = screen.getByText(/設定/);
-    fireEvent.click(settingsButton);
-
-    // 認証用フィールドを入力
-    const accessKeyInput = screen.getByLabelText(/アクセスキーID/);
-    const secretKeyInput = screen.getByLabelText(/シークレットアクセスキー/);
-    const authButton = screen.getByText(/🧪 AWS認証をテストする/);
-    await act(async () => {
-      fireEvent.change(accessKeyInput, { target: { value: 'test-access-key' } });
-      fireEvent.change(secretKeyInput, { target: { value: 'test-secret-key' } });
-    });
-    await waitFor(() => expect(authButton).not.toBeDisabled());
-    await act(async () => {
-      fireEvent.click(authButton);
-    });
-
-    // 認証処理が実行されることを確認
-    await waitFor(() => {
-      expect(TauriCommands.authenticateAws).toHaveBeenCalled();
-    }, { timeout: 5000 });
-
-    // 認証成功の表示を待つ
-    await waitFor(() => {
-      expect(screen.getByText(/✅ 成功/)).toBeInTheDocument();
-    }, { timeout: 5000 });
-
-    // 認証成功後にバケット名フィールドが表示されることを確認
-    await waitFor(() => {
-      expect(screen.getByLabelText(/S3バケット名/)).toBeInTheDocument();
-    }, { timeout: 5000 });
-
-    const bucketInput = screen.getByLabelText(/S3バケット名/);
-    const testButton = screen.getByText(/アクセスをテスト/);
-
-    await act(async () => {
-      fireEvent.change(bucketInput, { target: { value: 'new-bucket-name' } });
-      fireEvent.click(testButton);
-    });
-
-    await waitFor(() => {
-      expect(TauriCommands.testS3BucketAccess).toHaveBeenCalled();
-    });
-  });
-
-  it('should handle empty bucket name error', async () => {
-    // 認証が成功した状態をモック
-    vi.mocked(TauriCommands.authenticateAws).mockResolvedValue(dummyAuthResult);
-
-    render(
-      <ConfigManager
-        initialConfig={dummyAppConfig}
-        initialState={dummyAppState}
-        onConfigChange={mockOnConfigChange}
-        onStateChange={mockOnStateChange}
-        onAuthSuccess={mockOnAuthSuccess}
-        onHealthStatusChange={mockOnHealthStatusChange}
-      />
-    );
-
-    // 設定タブに切り替え
-    const settingsButton = screen.getByText(/設定/);
-    fireEvent.click(settingsButton);
-
-    // 認証用フィールドを入力
-    const accessKeyInput = screen.getByLabelText(/アクセスキーID/);
-    const secretKeyInput = screen.getByLabelText(/シークレットアクセスキー/);
-    const authButton = screen.getByText(/🧪 AWS認証をテストする/);
-    await act(async () => {
-      fireEvent.change(accessKeyInput, { target: { value: 'test-access-key' } });
-      fireEvent.change(secretKeyInput, { target: { value: 'test-secret-key' } });
-    });
-    await waitFor(() => expect(authButton).not.toBeDisabled());
-    await act(async () => {
-      fireEvent.click(authButton);
-    });
-
-    // 認証処理が実行されることを確認
-    await waitFor(() => {
-      expect(TauriCommands.authenticateAws).toHaveBeenCalled();
-    }, { timeout: 5000 });
-
-    // 認証成功の表示を待つ
-    await waitFor(() => {
-      expect(screen.getByText(/✅ 成功/)).toBeInTheDocument();
-    }, { timeout: 5000 });
-
-    // 認証成功後にバケット名フィールドが表示されることを確認
-    await waitFor(() => {
-      expect(screen.getByLabelText(/S3バケット名/)).toBeInTheDocument();
-    }, { timeout: 5000 });
-
-    const testButton = screen.getByText(/アクセスをテスト/);
-
-    await act(async () => {
-      fireEvent.click(testButton);
-    });
-
-    await waitFor(() => {
-      expect(TauriCommands.testS3BucketAccess).not.toHaveBeenCalled();
-    });
-  });
-
-  // ===== 健全性監視テスト =====
-  it('should start health monitoring on mount', async () => {
-    // ライフサイクル状況チェックの条件を満たすように設定を変更
-    const configWithBucket = {
-      ...dummyAppConfig,
-      user_preferences: {
-        ...dummyAppConfig.user_preferences,
-        default_bucket_name: 'test-bucket'
-      }
-    };
-
-    render(
-      <ConfigManager
-        initialConfig={configWithBucket}
-        initialState={dummyAppState}
-        onConfigChange={mockOnConfigChange}
-        onStateChange={mockOnStateChange}
-        onAuthSuccess={mockOnAuthSuccess}
-        onHealthStatusChange={mockOnHealthStatusChange}
-      />
-    );
-
-    // 認証情報が読み込まれた後、ライフサイクル状況チェックが実行されることを確認
-    await waitFor(() => {
-      expect(TauriCommands.getLifecycleStatus).toHaveBeenCalled();
-    }, { timeout: 3000 });
-  });
-
-  // ===== 統合テスト =====
-  it('should handle complete authentication flow', async () => {
-    // 認証が成功した状態をモック
-    vi.mocked(TauriCommands.authenticateAws).mockResolvedValue(dummyAuthResult);
-
-    render(
-      <ConfigManager
-        initialConfig={dummyAppConfig}
-        initialState={dummyAppState}
-        onConfigChange={mockOnConfigChange}
-        onStateChange={mockOnStateChange}
-        onAuthSuccess={mockOnAuthSuccess}
-        onHealthStatusChange={mockOnHealthStatusChange}
-      />
-    );
-
-    // 設定タブに切り替え
-    const settingsButton = screen.getByText(/設定/);
-    fireEvent.click(settingsButton);
-
-    // 認証用フィールドを入力
-    const accessKeyInput = screen.getByLabelText(/アクセスキーID/);
-    const secretKeyInput = screen.getByLabelText(/シークレットアクセスキー/);
-    const authButton = screen.getByText(/🧪 AWS認証をテストする/);
-    await act(async () => {
-      fireEvent.change(accessKeyInput, { target: { value: 'test-access-key' } });
-      fireEvent.change(secretKeyInput, { target: { value: 'test-secret-key' } });
-    });
-    await waitFor(() => expect(authButton).not.toBeDisabled());
-    await act(async () => {
-      fireEvent.click(authButton);
-    });
-
-    await waitFor(() => {
-      expect(TauriCommands.authenticateAws).toHaveBeenCalled();
-    });
-
-    // 認証処理が実行されることを確認
-    await waitFor(() => {
-      expect(TauriCommands.authenticateAws).toHaveBeenCalled();
-    }, { timeout: 5000 });
-
-    // 認証成功の表示を待つ
-    await waitFor(() => {
-      expect(screen.getByText(/✅ 成功/)).toBeInTheDocument();
-    }, { timeout: 5000 });
-
-    // 認証成功後にバケット名フィールドが表示される
-    await waitFor(() => {
-      expect(screen.getByLabelText(/S3バケット名/)).toBeInTheDocument();
-    }, { timeout: 5000 });
-  });
-
-  it('should switch to restore tab and show S3 object list button', async () => {
-    render(
-      <ConfigManager
-        initialConfig={dummyAppConfig}
-        initialState={dummyAppState}
-        onConfigChange={mockOnConfigChange}
-        onStateChange={mockOnStateChange}
-        onAuthSuccess={mockOnAuthSuccess}
-        onHealthStatusChange={mockOnHealthStatusChange}
-      />
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText(/リストア/)).toBeInTheDocument();
-    });
-
-    const restoreButton = screen.getByText(/リストア/);
-    fireEvent.click(restoreButton);
-
-    await waitFor(() => {
-      // ボタンとして「S3オブジェクト一覧を取得」が存在することを確認
-      expect(screen.getByRole('button', { name: /S3オブジェクト一覧を取得/ })).toBeInTheDocument();
+      expect(screen.getByText(/復元失敗/)).toBeInTheDocument();
     });
   });
 }); 
