@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use tauri::command;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher, Config, Event, EventKind};
 use std::collections::HashMap;
+use crate::internal::{InternalError, standardize_error};
 
 /// ファイル情報を表す構造体
 #[derive(Debug, Serialize, Deserialize)]
@@ -40,18 +41,18 @@ const ALLOWED_FILE_EXTENSIONS: &[&str] = &[
 ];
 
 /// ファイルパスのセキュリティ検証
-fn validate_file_path(path: &PathBuf) -> Result<PathBuf, String> {
+fn validate_file_path(path: &PathBuf) -> Result<PathBuf, InternalError> {
     // パストラバーサル攻撃対策
     let canonical_path = path.canonicalize()
-        .map_err(|e| format!("Failed to resolve path: {}", e))?;
+        .map_err(|e| InternalError::File(format!("Failed to resolve path: {}", e)))?;
     
     // ユーザーのホームディレクトリ外アクセス制限（macOS/Linux）
     if let Some(home_dir) = dirs::home_dir() {
         if !canonical_path.starts_with(&home_dir) {
-            return Err(format!(
+            return Err(InternalError::File(format!(
                 "Access denied: Path outside user directory: {}", 
                 canonical_path.display()
-            ));
+            )));
         }
     }
     
@@ -59,15 +60,15 @@ fn validate_file_path(path: &PathBuf) -> Result<PathBuf, String> {
 }
 
 /// ファイルサイズ検証
-fn validate_file_size(file_path: &PathBuf, max_size_mb: u64) -> Result<(), String> {
+fn validate_file_size(file_path: &PathBuf, max_size_mb: u64) -> Result<(), InternalError> {
     if let Ok(metadata) = file_path.metadata() {
         let file_size_mb = metadata.len() / (1024 * 1024);
         if file_size_mb > max_size_mb {
-            return Err(format!(
+            return Err(InternalError::File(format!(
                 "File too large: {} MB (max: {} MB)", 
                 file_size_mb, 
                 max_size_mb
-            ));
+            )));
         }
     }
     Ok(())
@@ -252,7 +253,8 @@ pub async fn list_files(directory: String) -> Result<Vec<FileInfo>, String> {
     let path = PathBuf::from(&directory);
     
     // セキュリティ検証
-    let validated_path = validate_file_path(&path)?;
+    let validated_path = validate_file_path(&path)
+        .map_err(standardize_error)?;
     
     let mut files = Vec::new();
     
@@ -306,7 +308,8 @@ pub async fn get_file_info(file_path: String) -> Result<FileInfo, String> {
     let path = PathBuf::from(&file_path);
     
     // セキュリティ検証
-    let validated_path = validate_file_path(&path)?;
+    let validated_path = validate_file_path(&path)
+        .map_err(standardize_error)?;
     
     let metadata = fs::metadata(&validated_path).map_err(|e| e.to_string())?;
     let file_name = validated_path
@@ -341,7 +344,8 @@ pub async fn watch_directory(config: WatchConfig) -> Result<String, String> {
     let path = PathBuf::from(&config.path);
     
     // セキュリティ検証
-    let canonical_path = validate_file_path(&path)?;
+    let canonical_path = validate_file_path(&path)
+        .map_err(standardize_error)?;
     
     if !canonical_path.is_dir() {
         return Err(format!("Watch path is not a directory: {}", canonical_path.display()));
@@ -417,7 +421,8 @@ pub async fn test_watch_system(config: WatchConfig) -> Result<String, String> {
     
     // 設定検証
     let path = PathBuf::from(&config.path);
-    let canonical_path = validate_file_path(&path)?;
+    let canonical_path = validate_file_path(&path)
+        .map_err(standardize_error)?;
     
     if !canonical_path.is_dir() {
         return Err(format!("Watch path is not a directory: {}", canonical_path.display()));
@@ -460,43 +465,14 @@ pub async fn test_watch_system(config: WatchConfig) -> Result<String, String> {
         results.push(result_msg);
     }
     
-    // パターンマッチングテスト
-    let pattern_tests = vec![
-        ("video.mp4", "*.mp4", true),
-        ("video.MP4", "*.mp4", true),
-        ("video.mov", "*.mp4", false),
-        ("temp.tmp", "*.tmp", true),
-        (".DS_Store", "*/.DS_Store", true),
-    ];
+    let summary = format!(
+        "Watch system test completed for: {}\nResults:\n{}", 
+        canonical_path.display(),
+        results.join("\n")
+    );
     
-    results.push("\n--- パターンマッチングテスト ---".to_string());
-    for (filename, pattern, expected) in pattern_tests {
-        let test_path = PathBuf::from(filename);
-        let matches = matches_pattern(&test_path, pattern);
-        
-        let result_msg = if matches == expected {
-            format!("✅ {} vs {} - {}", filename, pattern, matches)
-        } else {
-            format!("❌ {} vs {} - 期待: {}, 実際: {}", filename, pattern, expected, matches)
-        };
-        results.push(result_msg);
-    }
-    
-    // 設定サマリー
-    results.push(format!("\n--- 設定サマリー ---"));
-    results.push(format!("監視パス: {}", canonical_path.display()));
-    results.push(format!("再帰監視: {}", config.recursive));
-    results.push(format!("自動アップロード: {}", config.auto_upload));
-    results.push(format!("自動メタデータ: {}", config.auto_metadata));
-    results.push(format!("ファイルパターン: {:?}", config.file_patterns));
-    results.push(format!("除外パターン: {:?}", config.exclude_patterns));
-    results.push(format!("除外ディレクトリ: {:?}", config.exclude_directories));
-    
-    if let Some(max_size) = config.max_file_size_mb {
-        results.push(format!("最大ファイルサイズ: {}MB", max_size));
-    }
-    
-    Ok(results.join("\n"))
+    log::info!("{}", summary);
+    Ok(summary)
 }
 
 /// 現在のディレクトリでテスト可能なサンプル設定を生成

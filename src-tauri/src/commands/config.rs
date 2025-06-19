@@ -183,7 +183,7 @@ pub async fn set_config(app: AppHandle, config: AppConfig) -> Result<bool, Strin
     // 設定検証
     let validation = validate_config(&config);
     if !validation.valid {
-        return Err(format!("Config validation failed: {}", validation.errors.join(", ")));
+        return Err(standardize_error(InternalError::Other(format!("Config validation failed: {}", validation.errors.join(", ")))));
     }
 
     let config_path = get_config_path(&app)
@@ -262,7 +262,7 @@ pub async fn update_config(app: AppHandle, updates: HashMap<String, serde_json::
                 config.aws_settings.profile_name = value.as_str().map(String::from);
             }
             _ => {
-                return Err(format!("Unknown config key: {}", key));
+                return Err(standardize_error(InternalError::Other(format!("Unknown config key: {}", key))));
             }
         }
     }
@@ -298,7 +298,7 @@ pub async fn backup_config(app: AppHandle) -> Result<String, String> {
         .map_err(standardize_error)?;
     
     if !config_path.exists() {
-        return Err("No config file to backup".to_string());
+        return Err(standardize_error(InternalError::Other("No config file to backup".to_string())));
     }
 
     let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
@@ -323,7 +323,7 @@ pub async fn export_config(app: AppHandle, export_path: Option<String>) -> Resul
         .map_err(standardize_error)?;
     
     if !config_path.exists() {
-        return Err("設定ファイルが存在しません".to_string());
+        return Err(standardize_error(InternalError::Other("設定ファイルが存在しません".to_string())));
     }
 
     let destination_path = if let Some(path) = export_path {
@@ -352,11 +352,11 @@ pub async fn import_config(app: AppHandle, import_path: String) -> Result<AppCon
     let import_file = PathBuf::from(import_path);
     
     if !import_file.exists() {
-        return Err("インポートファイルが存在しません".to_string());
+        return Err(standardize_error(InternalError::Other("インポートファイルが存在しません".to_string())));
     }
 
     if !import_file.is_file() {
-        return Err("指定されたパスはファイルではありません".to_string());
+        return Err(standardize_error(InternalError::Other("指定されたパスはファイルではありません".to_string())));
     }
 
     // インポートファイルの読み込み
@@ -372,7 +372,7 @@ pub async fn import_config(app: AppHandle, import_path: String) -> Result<AppCon
     // インポートされた設定を検証
     let validation = validate_config(&imported_config);
     if !validation.valid {
-        return Err(format!("インポートされた設定に問題があります: {}", validation.errors.join(", ")));
+        return Err(standardize_error(InternalError::Other(format!("インポートされた設定に問題があります: {}", validation.errors.join(", ")))));
     }
 
     // 現在の設定をバックアップしてから新しい設定を適用
@@ -403,7 +403,7 @@ pub async fn restore_config(app: AppHandle, backup_path: String) -> Result<AppCo
     let backup_file = PathBuf::from(backup_path);
     
     if !backup_file.exists() {
-        return Err("Backup file does not exist".to_string());
+        return Err(standardize_error(InternalError::Other("Backup file does not exist".to_string())));
     }
 
     let backup_content = fs::read_to_string(&backup_file)
@@ -417,7 +417,7 @@ pub async fn restore_config(app: AppHandle, backup_path: String) -> Result<AppCo
     // 設定検証
     let validation = validate_config(&config);
     if !validation.valid {
-        return Err(format!("Backup config validation failed: {}", validation.errors.join(", ")));
+        return Err(standardize_error(InternalError::Other(format!("Backup config validation failed: {}", validation.errors.join(", ")))));
     }
 
     // 復元実行

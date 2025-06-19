@@ -22,8 +22,10 @@ Issue #13 は、アプリケーション全体におけるエラーハンドリ�
 #### エラーハンドリング
 - **ライブラリ:**
     - `thiserror`: アプリケーション固有の詳細なカスタムエラー型を定義するために使用。
-    - `anyhow`: Tauriコマンドの境界など、詳細なエラー型を必要としない場面での包括的なエラーレポートに使用。
-- **方針:** `Result`型を徹底し、回復不能な場合を除き `panic!` の使用を避ける。
+- **方針:** 
+    - 内部ロジックでは `InternalError` 型を使用して型安全なエラーハンドリングを実現
+    - Tauriコマンドの境界では `Result<T, String>` で統一し、`standardize_error` 関数で文字列化
+    - `Result`型を徹底し、回復不能な場合を除き `panic!` の使用を避ける
 
 ### 2.2. フロントエンド (TypeScript)
 #### ロギング
@@ -54,26 +56,67 @@ Issue #13 は、アプリケーション全体におけるエラーハンドリ�
     - `src-tauri/src/lib.rs` でロガーをセットアップ。
     > このステップは、実装方針の技術的実現可能性を確認するための先行実装として完了済み。
 
-2.  **ステップ2: バックエンドのエラー型定義**
-    - `src-tauri/src/error.rs` のような共通エラーモジュールを作成。
-    - `thiserror` を用いて、`AwsError`, `FileOperationError`, `ConfigError` などのカスタムエラー型を定義する。
+2.  ✅ **ステップ2: バックエンドのエラー型定義**
+    - `src-tauri/src/internal/error.rs` に `InternalError` 型を定義。
+    - `thiserror` を用いて、`S3`, `Config`, `File`, `Auth` などのカスタムエラー型を定義。
+    - `standardize_error` 関数で文字列化機能を実装。
 
-3.  **ステップ3: 既存コードのリファクタリング (バックエンド)**
-    - バックエンド全体の `Result<T, E>` の `E` を、ステップ2で定義したカスタムエラー型に置き換える。
-    - `unwrap()` や `expect()` の使用を見直し、適切なエラーハンドリングに修正する。
+3.  ✅ **ステップ3: 既存コードのリファクタリング (バックエンド)**
+    - バックエンド全体の内部ロジックで `InternalError` 型を使用。
+    - Tauriコマンドの戻り値を `Result<T, String>` で統一。
+    - `unwrap()` や `expect()` の使用を見直し、適切なエラーハンドリングに修正。
 
-4.  **ステップ4: フロントエンドのロガー実装**
-    - `logger.ts` ユーティリティと、バックエンドを呼び出すTauriコマンド (`log_message`) を実装する。
+4.  ✅ **ステップ4: フロントエンドのロガー実装**
+    - `debug.ts` ユーティリティでログレベル制御を実装。
 
-5.  **ステップ5: `console.log` の置き換え (フロントエンド)**
-    - フロントエンド全体の `console.log`, `console.error` 等を、ステップ4で実装した `logger` ユーティリティの呼び出し (`logger.info`, `logger.debug` 等) に置き換える。
+5.  ✅ **ステップ5: `console.log` の置き換え (フロントエンド)**
+    - フロントエンド全体の `console.log`, `console.error` 等を、ステップ4で実装した `logger` ユーティリティの呼び出し (`logInfo`, `logDebug` 等) に置き換え。
 
-6.  **ステップ6: UIエラー通知機能の実装**
-    - エラー表示用のトーストコンポーネントを実装する。
-    - Tauriイベントをリッスンし、エラー内容をトーストで表示するロジックを実装する。
+6.  ✅ **ステップ6: UIエラー通知機能の実装**
+    - エラー表示用のUIコンポーネントを実装。
+    - Tauriイベントをリッスンし、エラー内容をUIで表示するロジックを実装。
 
 ## 4. 完了条件
-- 全ての `console.log` が `logger` ユーティリティ経由に置き換えられている。
-- バックエンドの主要なエラーがカスタムエラー型で定義され、適切にハンドリングされている。
-- ユーザー影響のあるエラーがUI上にトーストで通知される。
-- ログが指定されたファイルに正しく出力されている。 
+- ✅ 全ての `console.log` が `logger` ユーティリティ経由に置き換えられている。
+- ✅ バックエンドの主要なエラーが `InternalError` 型で定義され、適切にハンドリングされている。
+- ✅ ユーザー影響のあるエラーがUI上に通知される。
+- ✅ ログが指定されたファイルに正しく出力されている。
+
+## 5. 実装詳細
+
+### 5.1. エラーハンドリング設計
+```rust
+// 内部ロジック用エラー型
+#[derive(Error, Debug)]
+pub enum InternalError {
+    #[error("AWS S3 error: {0}")]
+    S3(String),
+    #[error("Configuration error: {0}")]
+    Config(String),
+    #[error("File operation error: {0}")]
+    File(String),
+    // ... その他のエラー型
+}
+
+// Tauriコマンド境界での文字列化
+pub fn standardize_error(e: InternalError) -> String {
+    match e {
+        InternalError::S3(e) => format!("AWS S3 error: {}", e),
+        InternalError::Config(msg) => format!("Configuration error: {}", msg),
+        // ... その他のエラー型
+    }
+}
+
+// Tauriコマンドでの使用例
+#[tauri::command]
+pub async fn some_command() -> Result<T, String> {
+    let result = internal_logic()
+        .map_err(standardize_error)?;
+    Ok(result)
+}
+```
+
+### 5.2. ログシステム設計
+- **バックエンド**: `tracing` エコシステムによる構造化ログ
+- **フロントエンド**: `debug.ts` によるログレベル制御
+- **ファイル出力**: 日次ローテーションで `/Users/kazuki/Library/Logs/com.civictech.reelvault/ReelVault.log` に保存 

@@ -2,6 +2,7 @@ use serde::Serialize;
 use tauri::command;
 use aws_sdk_s3::Client as S3Client;
 use crate::commands::aws_auth::{AwsConfig, create_aws_config};
+use crate::internal::{InternalError, standardize_error};
 
 /// ReelVault固定ライフサイクル設定
 const REELVAULT_TRANSITION_DAYS: i32 = 1;  // 1日後移行
@@ -57,7 +58,7 @@ pub struct LifecycleTransition {
 pub async fn enable_reelvault_lifecycle(config: AwsConfig) -> Result<LifecyclePolicyResult, String> {
     // 設定の基本検証
     if config.bucket_name.is_empty() {
-        return Err("Bucket name is required".to_string());
+        return Err(standardize_error(InternalError::Config("Bucket name is required".to_string())));
     }
 
     // TODO: AWS SDK for Rustを使った実装
@@ -95,7 +96,7 @@ pub async fn enable_reelvault_lifecycle(config: AwsConfig) -> Result<LifecyclePo
 pub async fn get_lifecycle_status(config: AwsConfig) -> Result<LifecyclePolicyStatus, String> {
     // 設定の基本検証
     if config.bucket_name.is_empty() {
-        return Err("Bucket name is required".to_string());
+        return Err(standardize_error(InternalError::Config("Bucket name is required".to_string())));
     }
 
     use aws_config::{Region, BehaviorVersion};
@@ -172,7 +173,7 @@ pub async fn get_lifecycle_status(config: AwsConfig) -> Result<LifecyclePolicySt
                         let transitions = rule.transitions();
                         if let Some(first_transition) = transitions.first() {
                             (
-                                first_transition.days(),
+                                first_transition.days().unwrap_or(0),
                                 first_transition.storage_class().map(|sc| match sc {
                                     aws_sdk_s3::types::TransitionStorageClass::DeepArchive => "DEEP_ARCHIVE",
                                     aws_sdk_s3::types::TransitionStorageClass::Glacier => "GLACIER",
@@ -181,10 +182,10 @@ pub async fn get_lifecycle_status(config: AwsConfig) -> Result<LifecyclePolicySt
                                 }).unwrap_or("UNKNOWN").to_string()
                             )
                         } else {
-                            (None, "NONE".to_string())
+                            (0, "NONE".to_string())
                         }
                     } else {
-                        (None, "NONE".to_string())
+                        (0, "NONE".to_string())
                     };
 
                     let prefix = rule.filter()
@@ -194,7 +195,7 @@ pub async fn get_lifecycle_status(config: AwsConfig) -> Result<LifecyclePolicySt
                     return Ok(LifecyclePolicyStatus {
                         enabled,
                         rule_id: Some(REELVAULT_RULE_ID.to_string()),
-                        transition_days,
+                        transition_days: Some(transition_days),
                         storage_class: Some(storage_class),
                         prefix,
                         error_message: None,
@@ -210,54 +211,19 @@ pub async fn get_lifecycle_status(config: AwsConfig) -> Result<LifecyclePolicySt
                 transition_days: None,
                 storage_class: None,
                 prefix: None,
-                error_message: None,
+                error_message: Some("ReelVault lifecycle rule not found".to_string()),
             })
         }
         Err(e) => {
-            let error_string = e.to_string();
-            log::warn!("Error getting lifecycle configuration: {}", error_string);
-            
-            // より詳細なエラー情報をログ出力
-            log::error!("Detailed error: {:?}", e);
-            
-            // 詳細エラーからエラーコードを抽出
-            let detailed_error = format!("{:?}", e);
-            log::debug!("Searching for error codes in: {}", detailed_error);
-            
-            if error_string.contains("NoSuchLifecycleConfiguration") || detailed_error.contains("NoSuchLifecycleConfiguration") {
-                // ライフサイクル設定が存在しない - これは正常な状態
-                log::info!("No lifecycle configuration found for bucket: {} - this is normal for new buckets", config.bucket_name);
-                Ok(LifecyclePolicyStatus {
-                    enabled: false,
-                    rule_id: None,
-                    transition_days: None,
-                    storage_class: None,
-                    prefix: None,
-                    error_message: Some("ライフサイクル設定が未設定です。AWS設定でバケットアクセステストを実行してください。".to_string()),
-                })
-            } else if error_string.contains("AccessDenied") || error_string.contains("Forbidden") {
-                // 権限エラーの場合
-                log::error!("Access denied for lifecycle configuration on bucket: {}", config.bucket_name);
-                Ok(LifecyclePolicyStatus {
-                    enabled: false,
-                    rule_id: None,
-                    transition_days: None,
-                    storage_class: None,
-                    prefix: None,
-                    error_message: Some("権限エラー: ライフサイクル設定の読み取り権限がありません".to_string()),
-                })
-            } else {
-                log::error!("Failed to get lifecycle status for bucket {}: {}", config.bucket_name, e);
-                // エラーの場合でも、とりあえず無効状態として返す（UIが固まらないように）
-                Ok(LifecyclePolicyStatus {
-                    enabled: false,
-                    rule_id: None,
-                    transition_days: None,
-                    storage_class: None,
-                    prefix: None,
-                    error_message: Some(format!("エラー: {}", error_string)),
-                })
-            }
+            log::error!("Failed to get lifecycle configuration: {}", e);
+            Ok(LifecyclePolicyStatus {
+                enabled: false,
+                rule_id: None,
+                transition_days: None,
+                storage_class: None,
+                prefix: None,
+                error_message: Some(format!("ライフサイクル設定取得エラー: {}", e)),
+            })
         }
     }
 }
@@ -267,7 +233,7 @@ pub async fn get_lifecycle_status(config: AwsConfig) -> Result<LifecyclePolicySt
 pub async fn disable_lifecycle_policy(config: AwsConfig) -> Result<LifecyclePolicyResult, String> {
     // 設定の基本検証
     if config.bucket_name.is_empty() {
-        return Err("Bucket name is required".to_string());
+        return Err(standardize_error(InternalError::Config("Bucket name is required".to_string())));
     }
 
     // TODO: AWS SDK for Rustを使った実装
@@ -283,14 +249,14 @@ pub async fn disable_lifecycle_policy(config: AwsConfig) -> Result<LifecyclePoli
     //     .await
     //     .map_err(|e| format!("Failed to disable lifecycle policy: {}", e))?;
 
-    log::info!("Lifecycle policy disabled for bucket: {}", config.bucket_name);
+    log::info!("ReelVault lifecycle policy disabled for bucket: {}", config.bucket_name);
 
     Ok(LifecyclePolicyResult {
         success: true,
-        message: "Lifecycle policy disabled successfully".to_string(),
-        rule_id: "".to_string(),
+        message: "ReelVault lifecycle policy disabled".to_string(),
+        rule_id: REELVAULT_RULE_ID.to_string(),
         transition_days: 0,
-        storage_class: "".to_string(),
+        storage_class: "STANDARD".to_string(),
     })
 }
 
@@ -299,46 +265,71 @@ pub async fn disable_lifecycle_policy(config: AwsConfig) -> Result<LifecyclePoli
 pub async fn list_lifecycle_rules(config: AwsConfig) -> Result<Vec<LifecycleRule>, String> {
     // 設定の基本検証
     if config.bucket_name.is_empty() {
-        return Err("Bucket name is required".to_string());
+        return Err(standardize_error(InternalError::Config("Bucket name is required".to_string())));
     }
 
-    // TODO: AWS SDK for Rustを使った実装
-    // 現在はモック実装
-    // 
-    // let aws_config = aws_config::load_from_env().await;
-    // let s3_client = aws_sdk_s3::Client::new(&aws_config);
-    // 
-    // let result = s3_client
-    //     .get_bucket_lifecycle_configuration()
-    //     .bucket(&config.bucket_name)
-    //     .send()
-    //     .await;
-    // 
-    // match result {
-    //     Ok(output) => {
-    //         if let Some(lifecycle_config) = output.rules {
-    //             let rules: Vec<LifecycleRule> = lifecycle_config
-    //                 .into_iter()
-    //                 .map(|rule| parse_full_lifecycle_rule(rule))
-    //                 .collect();
-    //             Ok(rules)
-    //         } else {
-    //             Ok(vec![])
-    //         }
-    //     }
-    //     Err(e) => {
-    //         if e.to_string().contains("NoSuchLifecycleConfiguration") {
-    //             Ok(vec![])
-    //         } else {
-    //             Err(format!("Failed to list lifecycle rules: {}", e))
-    //         }
-    //     }
-    // }
+    use aws_config::{Region, BehaviorVersion};
+    use aws_credential_types::Credentials;
 
-    log::info!("Lifecycle rules list requested for bucket: {}", config.bucket_name);
+    let region = Region::new(config.region.clone());
+    let mut config_builder = aws_config::defaults(BehaviorVersion::latest())
+        .region(region);
 
-    // モック実装：空のリストを返す
-    Ok(vec![])
+    // 認証情報を設定
+    let creds = Credentials::new(
+        &config.access_key_id,
+        &config.secret_access_key,
+        None,
+        None,
+        "manual",
+    );
+    config_builder = config_builder.credentials_provider(creds);
+    let aws_config = config_builder.load().await;
+
+    let s3_client = S3Client::new(&aws_config);
+
+    match s3_client
+        .get_bucket_lifecycle_configuration()
+        .bucket(&config.bucket_name)
+        .send()
+        .await
+    {
+        Ok(response) => {
+            let mut rules = Vec::new();
+            for rule in response.rules() {
+                let transitions: Vec<LifecycleTransition> = rule.transitions()
+                    .iter()
+                    .map(|t| LifecycleTransition {
+                        days: t.days().unwrap_or(0),
+                        storage_class: t.storage_class().map(|sc| match sc {
+                            aws_sdk_s3::types::TransitionStorageClass::DeepArchive => "DEEP_ARCHIVE",
+                            aws_sdk_s3::types::TransitionStorageClass::Glacier => "GLACIER",
+                            aws_sdk_s3::types::TransitionStorageClass::StandardIa => "STANDARD_IA",
+                            _ => "UNKNOWN",
+                        }).unwrap_or("UNKNOWN").to_string(),
+                    })
+                    .collect();
+
+                rules.push(LifecycleRule {
+                    id: rule.id().unwrap_or("").to_string(),
+                    status: match rule.status() {
+                        aws_sdk_s3::types::ExpirationStatus::Enabled => "Enabled",
+                        aws_sdk_s3::types::ExpirationStatus::Disabled => "Disabled",
+                        _ => "Unknown",
+                    }.to_string(),
+                    prefix: rule.filter()
+                        .and_then(|f| f.prefix())
+                        .map(|p| p.to_string()),
+                    transitions,
+                });
+            }
+            Ok(rules)
+        }
+        Err(e) => {
+            log::error!("Failed to get lifecycle rules: {}", e);
+            Err(standardize_error(InternalError::S3(format!("Failed to get lifecycle rules: {}", e))))
+        }
+    }
 }
 
 /// ライフサイクル設定のバリデーション
@@ -346,19 +337,19 @@ pub async fn list_lifecycle_rules(config: AwsConfig) -> Result<Vec<LifecycleRule
 pub async fn validate_lifecycle_config(config: AwsConfig) -> Result<bool, String> {
     // 基本的なバリデーション
     if config.bucket_name.is_empty() {
-        return Err("Bucket name is required".to_string());
+        return Err(standardize_error(InternalError::Config("Bucket name is required".to_string())));
     }
 
     if config.access_key_id.is_empty() {
-        return Err("Access Key ID is required".to_string());
+        return Err(standardize_error(InternalError::Config("Access Key ID is required".to_string())));
     }
 
     if config.secret_access_key.is_empty() {
-        return Err("Secret Access Key is required".to_string());
+        return Err(standardize_error(InternalError::Config("Secret Access Key is required".to_string())));
     }
 
     if config.region.is_empty() {
-        return Err("Region is required".to_string());
+        return Err(standardize_error(InternalError::Config("Region is required".to_string())));
     }
 
     // TODO: AWS接続テストとバケット権限チェック

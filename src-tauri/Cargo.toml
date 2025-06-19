@@ -51,6 +51,8 @@ ring = "0.17"           # 暗号化ライブラリ
 base64 = "0.22"         # Base64エンコーディング
 keyring = "2.3"         # OS キーチェーン統合（macOS Keychain等）
 futures = "0.3.31"
+rfd = "0.15.3"
+sysinfo = "0.35.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "2.11"  # macOS Security Framework for Touch ID/Face ID
