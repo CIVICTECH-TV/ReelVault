@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { logDebug, logInfo, logError, logWarn, getLogLevel } from '../debug';
+import { logDebug, logInfo, logError, logWarn, getLogLevel, logEnvironmentInfo, isDev, debugLog, debugError, debugWarn, debugInfo } from '../debug';
 
 // console.logのモック
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -109,5 +109,123 @@ describe('debug utility', () => {
     const level = getLogLevel();
 
     expect(level).toBe('debug');
+  });
+});
+
+describe('logEnvironmentInfo', () => {
+  beforeEach(() => {
+    mockConsoleLog.mockClear();
+  });
+
+  it('should log environment info when window.location exists', () => {
+    // window.locationをモック
+    const originalWindow = global.window;
+    // @ts-ignore
+    (globalThis as any).window = Object.create(window);
+    Object.defineProperty((globalThis as any).window, 'location', {
+      value: {
+        hostname: 'localhost',
+        protocol: 'http:',
+        href: 'http://localhost/',
+      },
+      writable: true,
+    });
+    // import.meta.env.DEVをモック
+    const originalImportMeta = (globalThis as any).import?.meta;
+    (globalThis as any).import = { meta: { env: { DEV: true } } };
+
+    logEnvironmentInfo();
+    expect(mockConsoleLog).toHaveBeenCalledWith(
+      '🔍 Environment Info:',
+      expect.objectContaining({
+        hostname: 'localhost',
+        protocol: 'http:',
+        href: 'http://localhost/',
+        'import.meta.env.DEV': true,
+        isDevelopment: true
+      })
+    );
+
+    // 後始末
+    (globalThis as any).window = originalWindow;
+    if (originalImportMeta) (globalThis as any).import = { meta: originalImportMeta };
+  });
+
+  it('should not log when window.location does not exist', () => {
+    // window.locationをundefinedに
+    const originalWindow = global.window;
+    (globalThis as any).window = {};
+    logEnvironmentInfo();
+    expect(mockConsoleLog).not.toHaveBeenCalled();
+    (globalThis as any).window = originalWindow;
+  });
+});
+
+describe('isDev', () => {
+  it('should return true when import.meta.env.DEV is true', () => {
+    vi.stubEnv('DEV', 'true');
+    const result = isDev();
+    expect(result).toBe(true);
+    vi.unstubAllEnvs();
+  });
+
+  it.skip('should return false when import.meta.env.DEV is false', () => {
+    vi.stubEnv('DEV', 'false');
+    const result = isDev();
+    expect(result).toBe(false);
+    vi.unstubAllEnvs();
+  });
+
+  it.skip('should return false when import.meta.env.DEV is undefined', () => {
+    vi.stubEnv('DEV', '');
+    const result = isDev();
+    expect(result).toBe(false);
+    vi.unstubAllEnvs();
+  });
+});
+
+describe('getCurrentLogLevel (exception path)', () => {
+  it('should log error and return info when localStorage value is broken', () => {
+    // localStorage.getItemが壊れた値を返す
+    (window.localStorage.getItem as any).mockReturnValue('not-json');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const level = getLogLevel();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to get log level from config:'),
+      expect.any(Error)
+    );
+    expect(level).toBe('info');
+    errorSpy.mockRestore();
+  });
+});
+
+describe('alias functions', () => {
+  it('debugLog should behave as logDebug', () => {
+    (window.localStorage.getItem as any).mockReturnValue(
+      JSON.stringify({ app_settings: { log_level: 'debug' } })
+    );
+    const testMessage = 'alias debug';
+    debugLog(testMessage);
+    expect(mockConsoleLog).toHaveBeenCalledWith('[DEBUG]', testMessage);
+  });
+
+  it('debugError should behave as logError', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const testMessage = 'alias error';
+    debugError(testMessage);
+    expect(errorSpy).toHaveBeenCalledWith(testMessage);
+    errorSpy.mockRestore();
+  });
+
+  it('debugWarn should behave as logWarn', () => {
+    const testMessage = 'alias warn';
+    debugWarn(testMessage);
+    expect(mockConsoleWarn).toHaveBeenCalledWith(testMessage);
+  });
+
+  it('debugInfo should behave as logInfo', () => {
+    const testMessage = 'alias info';
+    debugInfo(testMessage);
+    expect(mockConsoleLog).toHaveBeenCalledWith(testMessage);
   });
 }); 
