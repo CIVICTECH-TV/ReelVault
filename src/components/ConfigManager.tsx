@@ -2,7 +2,8 @@
 import React, { useState, useEffect, forwardRef, useImperativeHandle, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-shell';
-import { TauriCommands, AppConfig, AwsCredentials, AwsConfig, AppState, SystemStatus, RestoreInfo, RestoreNotification, LifecyclePolicyStatus, LifecycleRule, S3Object, RestoreStatusResult, ConfigValidationResult, AwsAuthResult, PermissionCheck } from '../services/tauriCommands';
+import { getVersion } from '@tauri-apps/api/app';
+import { TauriCommands, AppConfig, AwsCredentials, AwsConfig, AppState, SystemStatus, RestoreInfo, RestoreNotification, LifecyclePolicyStatus, LifecycleRule, S3Object, RestoreStatusResult, ConfigValidationResult, AwsAuthResult, PermissionCheck, UploadItem } from '../services/tauriCommands';
 import { AWS_REGIONS, DEFAULT_REGION } from '../constants/aws-regions';
 // RestoreManagerは直接統合済み
 import { UploadManager } from './UploadManager';
@@ -41,6 +42,7 @@ export const ConfigManager = forwardRef<ConfigManagerRef, ConfigManagerProps>(({
 }, ref) => {
   const [config, setConfig] = useState<AppConfig>(initialConfig);
   const [appState, setAppState] = useState<AppState>(initialState);
+  const [appVersion, setAppVersion] = useState<string>('');
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -150,6 +152,11 @@ export const ConfigManager = forwardRef<ConfigManagerRef, ConfigManagerProps>(({
     };
     
     loadSavedCredentials();
+  }, []);
+
+  // アプリバージョン取得
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => setAppVersion('不明'));
   }, []);
 
   // バケット設定時に自動でライフサイクル状況をチェック + 健全性監視開始
@@ -1311,7 +1318,7 @@ export const ConfigManager = forwardRef<ConfigManagerRef, ConfigManagerProps>(({
           </div>
           
           <div className="app-info">
-            <div className="app-name">ReelVault</div>
+            <div className="app-name">ReelVault v{appVersion}</div>
             <div className="app-subtitle">映像制作者のためのアーカイブツール</div>
             <div className="app-copyright">© 2025 CIVICTECH.TV, LLC</div>
           </div>
@@ -1391,7 +1398,7 @@ export const ConfigManager = forwardRef<ConfigManagerRef, ConfigManagerProps>(({
                 <label>アプリバージョン:</label>
                 <input
                   type="text"
-                  value={config.version}
+                  value={appVersion || '読み込み中...'}
                   disabled
                   className="readonly-input"
                 />

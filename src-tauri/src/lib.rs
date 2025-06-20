@@ -5,6 +5,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, Emitter,
 };
+use tauri_plugin_dialog::DialogExt;
 
 // モジュール定義
 mod commands {
@@ -34,10 +35,11 @@ use commands::lifecycle::*;
 // システムトレイのセットアップ関数
 fn setup_system_tray(app: &tauri::App) -> tauri::Result<()> {
     let settings_item = MenuItem::with_id(app, "settings", "設定", true, Some("Cmd+,"))?;
+    let version_item = MenuItem::with_id(app, "version", "ReelVaultのバージョン情報", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, "quit", "終了", true, Some("Cmd+Q"))?;
     
-    let menu = Menu::with_items(app, &[&settings_item, &separator, &quit_item])?;
+    let menu = Menu::with_items(app, &[&settings_item, &version_item, &separator, &quit_item])?;
     
     let _tray = TrayIconBuilder::new()
         .icon(app.default_window_icon().unwrap().clone())
@@ -58,17 +60,34 @@ fn setup_system_tray(app: &tauri::App) -> tauri::Result<()> {
             }
             _ => {}
         })
-        .on_menu_event(|app, event| match event.id.as_ref() {
-            "settings" => {
-                // 設定画面を開く
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                    let _ = app.emit("open-settings", ());
+        .on_menu_event(|app, event| {
+            match event.id.as_ref() {
+                "settings" => {
+                    // 設定画面を開く
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                        let _ = app.emit("open-settings", ());
+                    }
                 }
+                "version" => {
+                    // バージョン情報を表示
+                    tracing::info!("Version menu item clicked!");
+                    let app = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let version = env!("CARGO_PKG_VERSION");
+                        tracing::info!("Showing version dialog: ReelVault v{}", version);
+                        let shown = app.dialog().message(&format!("ReelVault v{}", version)).blocking_show();
+                        if shown {
+                            tracing::info!("Dialog shown successfully");
+                        } else {
+                            tracing::warn!("Dialog was not shown, possibly closed by user.");
+                        }
+                    });
+                }
+                "quit" => app.exit(0),
+                _ => {}
             }
-            "quit" => app.exit(0),
-            _ => {}
         })
         .build(app)?;
     
