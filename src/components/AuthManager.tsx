@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { open } from '@tauri-apps/plugin-shell';
 import { TauriCommands, AwsCredentials, AwsConfig, LifecyclePolicyStatus, AppConfig } from '../services/tauriCommands';
 import { AWS_REGIONS, DEFAULT_REGION } from '../constants/aws-regions';
-import './AuthManager.css';
 
 interface AuthManagerProps {
   config: AppConfig;
@@ -130,9 +129,9 @@ export const AuthManager: React.FC<AuthManagerProps> = ({
   };
 
   return (
-    <div className="auth-manager-wrapper">
-      <div className="card">
-        <h3><span className="icon">🚀</span>初期設定</h3>
+    <div className="content-container">
+      <div className="section">
+        <h3 className="section-title"><span className="icon">🚀</span>初期設定</h3>
         <ol className="setup-instructions">
           <li>AWSアカウントがなければ、<a href="https://aws.amazon.com/register/" target="_blank" rel="noopener noreferrer">作成してください</a>。</li>
           <li>必要なリソースを自動作成するので、<button className="link-button" onClick={handleOpenCloudFormation}>ここをクリックしてください</button>。</li>
@@ -141,68 +140,87 @@ export const AuthManager: React.FC<AuthManagerProps> = ({
         </ol>
       </div>
 
-      <div className="card">
-        <h3><span className="icon">🔑</span>手動設定</h3>
-        <div className="form-group">
+      <div className="section">
+        <h3 className="section-title"><span className="icon">🔑</span>手動設定</h3>
+        <div className="form-row">
           <label htmlFor="access-key-id">アクセスキーID:</label>
-          <input id="access-key-id" type="text" value={credentials.access_key_id} onChange={(e) => handleInputChange('access_key_id', e.target.value)} placeholder="アクセスキーID" />
+          <div className="control">
+            <input id="access-key-id" type="text" value={credentials.access_key_id} onChange={(e) => handleInputChange('access_key_id', e.target.value)} placeholder="アクセスキーID" />
+          </div>
         </div>
-        <div className="form-group">
+        <div className="form-row">
           <label htmlFor="secret-access-key">シークレットアクセスキー:</label>
-          <input id="secret-access-key" type="password" value={credentials.secret_access_key} onChange={(e) => handleInputChange('secret_access_key', e.target.value)} placeholder="シークレットアクセスキー" />
+          <div className="control">
+            <input id="secret-access-key" type="password" value={credentials.secret_access_key} onChange={(e) => handleInputChange('secret_access_key', e.target.value)} placeholder="シークレットアクセスキー" />
+          </div>
         </div>
-        <div className="form-group">
+        <div className="form-row">
           <label htmlFor="s3-bucket-name">S3バケット名:</label>
-          <input id="s3-bucket-name" type="text" value={bucketName} onChange={(e) => handleBucketNameChange(e.target.value)} placeholder="S3バケット名" />
+          <div className="control">
+            <input id="s3-bucket-name" type="text" value={bucketName} onChange={(e) => handleBucketNameChange(e.target.value)} placeholder="S3バケット名" />
+          </div>
         </div>
-        <div className="form-group">
+        <div className="form-row">
           <label htmlFor="aws-region">AWSリージョン:</label>
-          <select id="aws-region" value={credentials.region} onChange={(e) => handleInputChange('region', e.target.value)}>
-            {AWS_REGIONS.map((region) => (
-              <option key={region.code} value={region.code}>{region.name} ({region.description})</option>
-            ))}
-          </select>
-          <p className="description">（東京から基本的には変更しないでください）</p>
+          <div className="control">
+            <select id="aws-region" value={credentials.region} onChange={(e) => handleInputChange('region', e.target.value)}>
+              {AWS_REGIONS.map((region) => (
+                <option key={region.code} value={region.code}>{region.name} ({region.description})</option>
+              ))}
+            </select>
+          </div>
         </div>
-        <div className="form-group">
-          <button onClick={handleAuthenticate} className="btn-primary" disabled={isAuthLoading}>
-            {isAuthLoading ? '認証中...' : 'AWS認証をテストする'}
-          </button>
+        <div className="form-row">
+          <label></label> {/* For alignment */}
+          <div className="control">
+            <button onClick={handleAuthenticate} className="btn-primary" disabled={isAuthLoading}>
+              {isAuthLoading ? '認証中...' : 'AWS認証をテストする'}
+            </button>
+          </div>
         </div>
         {authResult && (
-          <div className={`auth-result ${authResult.type}`}>
-            <p>{authResult.message}</p>
+          <div className="form-row">
+            <label></label> {/* For alignment */}
+            <div className="control">
+              <div className={`alert ${authResult.type === 'success' ? 'alert-success' : 'alert-error'}`}>
+                {authResult.message}
+              </div>
+            </div>
           </div>
         )}
       </div>
 
-      <div className="card" style={{ marginTop: '2rem' }}>
-        <h3><span className="icon">🔄</span>ライフサイクル管理</h3>
-        {isLifecycleLoading ? (
-          <p>状況を確認中...</p>
-        ) : lifecycleStatus ? (
-          lifecycleStatus.error_message ? (
-            <div className="status-card error"><p>⚠️ {lifecycleStatus.error_message}</p></div>
-          ) : lifecycleStatus.enabled ? (
-            <div className="status-card success">
-              <p>
-                <strong>ステータス:</strong> ✅ 有効
-                <span className="status-divider">|</span>
-                <strong>移行日数:</strong> {lifecycleStatus.transition_days}日後
-                <span className="status-divider">|</span>
-                <strong>移行先:</strong> {lifecycleStatus.storage_class}
-              </p>
-            </div>
-          ) : (
-            <div className="status-card warning"><p>ステータス: ❌ 無効</p></div>
-          )
-        ) : (
-          <p>バケットが設定されていません。</p>
-        )}
+      <div className="section">
+        <h3 className="section-title"><span className="icon">🔄</span>ライフサイクル管理</h3>
+        <div className="form-row">
+          <label>現在の状態:</label>
+          <div className="control">
+            {isLifecycleLoading ? (
+              <div className="data-box">状況を確認中...</div>
+            ) : lifecycleStatus ? (
+              lifecycleStatus.error_message ? (
+                <div className="alert alert-error">⚠️ {lifecycleStatus.error_message}</div>
+              ) : lifecycleStatus.enabled ? (
+                <div className="alert alert-success">
+                  ✅ 有効 ({lifecycleStatus.transition_days}日後 → {lifecycleStatus.storage_class})
+                </div>
+              ) : (
+                <div className="alert alert-warning">❌ 無効</div>
+              )
+            ) : (
+              <div className="data-box">バケットが設定されていません。</div>
+            )}
+          </div>
+        </div>
         {!isLifecycleLoading && lifecycleStatus && !lifecycleStatus.enabled && (
-          <button onClick={enableReelvaultLifecycle} className="btn-primary" disabled={isLifecycleLoading}>
-            ReelVault推奨ライフサイクルを有効化
-          </button>
+          <div className="form-row">
+            <label></label> {/* For alignment */}
+            <div className="control">
+              <button onClick={enableReelvaultLifecycle} className="btn-primary" disabled={isLifecycleLoading}>
+                ReelVault推奨ライフサイクルを有効化
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>

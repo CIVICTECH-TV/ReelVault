@@ -7,7 +7,6 @@ import { Sidebar } from './Sidebar';
 import { AuthManager } from './AuthManager';
 import { StatusManager } from './StatusManager';
 import { RestoreTab } from './tabs/RestoreTab';
-import './ConfigManager.css';
 
 interface ConfigManagerProps {
   initialConfig: AppConfig;

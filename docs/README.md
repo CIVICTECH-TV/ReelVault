@@ -6,6 +6,11 @@ ReelVaultプロジェクトの包括的なドキュメントコレクション
 
 ### 🏗️ **実装・技術ドキュメント**
 #### `implementation/`
+- **`CSS_DESIGN_SYSTEM.md`**: CSS設計システムとベストプラクティス
+  - 統一デザインシステムの設計方針
+  - ファイル分離の哲学（index.css vs common.css）
+  - 段階的リファクタリング戦略
+  - 実装ガイドラインとベストプラクティス
 - **`LIFECYCLE_MONITORING_IMPLEMENTATION.md`**: S3ライフサイクル監視システムの技術実装詳細
   - 包括的監視タイミング（起動時・定期・アップロード前）
   - Backend/Frontend統合実装
@@ -48,6 +53,12 @@ ReelVaultプロジェクトの包括的なドキュメントコレクション
 - **`epic1-progress.md`**: Epic 1（インフラ基盤）進捗状況
   - ⚠️ **注意**: このファイルは古い情報を含む可能性があります
 
+### 🎨 **技術設計・議論記録**
+#### `technical-design/`
+- **`css統合.md`**: CSS統合作業の一時的な記録
+  - ⚠️ **注意**: 一時的な記録です。最新情報は`implementation/CSS_DESIGN_SYSTEM.md`を参照
+- **`issue-13-logging-error-handling.md`**: ログ・エラーハンドリング設計
+
 ## 🎯 **Phase完了状況**
 
 ### ✅ **Phase 1: インフラ基盤** - **完了**
@@ -69,11 +80,13 @@ ReelVaultプロジェクトの包括的なドキュメントコレクション
 2. **API仕様を確認したい** → `api/tauri-command-api.md`
 3. **機能をテストしたい** → `testing/`
 4. **プロジェクト全体を把握したい** → `project-management/`
+5. **CSS設計を理解したい** → `implementation/CSS_DESIGN_SYSTEM.md`
 
 ### 🔍 **開発者向け**
 - **新機能実装時**: `implementation/`の既存パターンを参考
 - **API追加時**: `api/tauri-command-api.md`を更新
 - **テスト作成時**: `testing/`のガイドラインに従う
+- **UI/UX開発時**: `CSS_DESIGN_SYSTEM.md`のガイドラインに従う
 
 ### 📈 **プロジェクト管理者向け**
 - **進捗確認**: `project-management/`の管理ファイル
@@ -87,6 +100,7 @@ ReelVaultプロジェクトの包括的なドキュメントコレクション
 - **API変更時**: API仕様書即座更新
 - **バグ修正時**: 関連テストガイド更新
 - **Phase完了時**: 進捗ドキュメント更新
+- **設計方針変更時**: 技術設計ドキュメント更新
 
 ### 📍 **配置ルール**
 - **技術実装詳細** → `implementation/`
@@ -94,6 +108,7 @@ ReelVaultプロジェクトの包括的なドキュメントコレクション
 - **テスト・検証** → `testing/`
 - **機能記録** → `features/`
 - **プロジェクト管理** → `project-management/`
+- **技術設計・議論記録** → `technical-design/`
 
 ## 🏆 **ドキュメント品質基準**
 

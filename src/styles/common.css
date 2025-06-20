@@ -1,0 +1,952 @@
+/*
+  ReelVault - 共通デザインシステム
+  - `ConfigManager.css` と提示されたデザイン画像を元に作成
+  - デザインの一貫性を保ち、CSSの重複を排除する
+*/
+
+:root {
+  /* 
+    カラーパレット
+    - 画像のデザインと `ConfigManager.css` から抽出
+  */
+
+  /* 背景色 */
+  --bg-main-content: rgb(238, 238, 238); /* #eeeeee */
+  --bg-sidebar: rgb(208, 208, 206);      /* #d0d0ce */
+  --bg-component: rgb(213, 214, 215);    /* #d5d6d7 - データ表示ボックスなど */
+  --bg-component-light: #ffffff;
+  --bg-active-tab: rgb(189, 189, 189);   /* #bdbdbd - 仮 */
+  --bg-hover-tab: rgb(199, 199, 199);    /* #c7c7c7 - 仮 */
+
+  /* テキスト色 */
+  --text-primary: rgb(0, 0, 0);
+  --text-secondary: #333333;
+  --text-light: #555555;
+  --text-on-dark-bg: #ffffff;
+
+  /* ボーダー色 */
+  --border-primary: rgba(0, 0, 0, 0.2);
+  --border-secondary: rgba(0, 0, 0, 0.1);
+
+  /* アクセントカラー */
+  --accent-success: #2e7d32; /* 少し落ち着いた緑 */
+  --accent-success-bg: rgba(46, 125, 50, 0.1);
+  --accent-error: #d32f2f; /* 少し落ち着いた赤 */
+  --accent-error-bg: rgba(211, 47, 47, 0.1);
+  --accent-warning: #666666;
+  --accent-warning-bg: rgba(102, 102, 102, 0.1);
+  --accent-primary-dark: #333333;
+  --accent-primary-darker: #1a1a1a;
+
+  /* ボタン色 */
+  --btn-primary-bg: #555555;
+  --btn-primary-hover-bg: #444444;
+  --btn-secondary-bg: #f0f0f0;
+  --btn-secondary-hover-bg: #e0e0e0;
+  --btn-secondary-border: #dddddd;
+  --btn-secondary-hover-border: #cccccc;
+  --btn-text-primary: #ffffff;
+  --btn-text-secondary: #333333;
+
+  /*
+    タイポグラフィ
+    - macOSのシステムフォントに合わせる
+  */
+  --font-family-system: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic Medium", "Meiryo", "Segoe UI", Roboto, sans-serif;
+
+  /*
+    スペーシング＆サイズ
+  */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 20px;
+  --spacing-xl: 24px;
+  
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+
+  /*
+    トランジション
+  */
+  --transition-fast: all 0.2s ease;
+}
+
+/*
+  基本スタイルリセット
+  - `index.css` からの移行と整理
+*/
+body, html, #root {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-family-system);
+  color: var(--text-primary);
+  background-color: var(--bg-main-content);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "liga" 1, "kern" 1;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+/*
+  共通レイアウトクラス
+*/
+.two-column-layout {
+  display: flex;
+  height: 100vh;
+}
+
+.sidebar {
+  width: 240px;
+  background: rgb(208, 208, 206);
+  display: flex;
+  flex-direction: column;
+  box-shadow: none;
+}
+
+.main-content {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 100vh;
+}
+
+.content-container {
+  padding: 2rem;
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-primary);
+  height: 100%;
+  box-sizing: border-box;
+}
+
+/*
+  共通コンポーネントクラス
+*/
+
+/* --- ボタン --- */
+.btn-primary,
+.btn-secondary,
+.btn-success,
+.btn-warning,
+.btn-danger {
+  padding: 10px 20px;
+  border-radius: var(--radius-md);
+  font-weight: 500;
+  font-size: 13px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  border: 1px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-primary:disabled,
+.btn-secondary:disabled,
+.btn-success:disabled,
+.btn-warning:disabled,
+.btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-primary {
+  background: var(--btn-primary-bg);
+  color: var(--btn-text-primary);
+  border-color: var(--btn-primary-bg);
+  font-size: 13px;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--btn-primary-hover-bg);
+  border-color: var(--btn-primary-hover-bg);
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background: var(--btn-secondary-bg);
+  color: var(--btn-text-secondary);
+  border: 1px solid var(--btn-secondary-border);
+  box-shadow: none;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--btn-secondary-hover-bg);
+  border-color: var(--btn-secondary-hover-border);
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.btn-warning {
+  background: var(--accent-warning);
+  color: var(--text-on-dark-bg);
+  border-color: var(--accent-warning);
+}
+
+.btn-warning:hover:not(:disabled) {
+  background: #555555;
+  border-color: #555555;
+}
+
+.btn-danger {
+  background: var(--accent-error);
+  color: var(--text-on-dark-bg);
+  border-color: var(--accent-error);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #b71c1c;
+  border-color: #b71c1c;
+}
+
+.btn-success {
+  background: var(--accent-success);
+  color: var(--text-on-dark-bg);
+  border-color: var(--accent-success);
+}
+
+.btn-success:hover:not(:disabled) {
+  background: #1b5e20;
+  border-color: #1b5e20;
+}
+
+/* --- アラート --- */
+.alert {
+  padding: 12px var(--spacing-md);
+  border-radius: var(--radius-lg);
+  margin-bottom: 0;
+  border: 1px solid transparent;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+}
+
+.alert-success {
+  background-color: var(--accent-success-bg);
+  border-color: var(--accent-success);
+  color: var(--accent-success);
+}
+
+.alert-error {
+  background-color: var(--accent-error-bg);
+  border-color: var(--accent-error);
+  color: var(--accent-error);
+  font-weight: 500;
+}
+
+.alert-warning {
+  background-color: var(--accent-warning-bg);
+  border-color: var(--accent-warning);
+  color: var(--accent-warning);
+}
+
+/* --- データ表示ボックス --- */
+.data-box {
+  background-color: var(--bg-component);
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-lg);
+  padding: 12px var(--spacing-md);
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+}
+
+/* --- セクション --- */
+.section {
+  background: var(--bg-component-light);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-xl);
+  margin-bottom: var(--spacing-xl);
+}
+
+.section-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-lg);
+}
+
+.section-header-controls {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+/* --- モーダル --- */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: var(--bg-main-content);
+  padding: var(--spacing-xl);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  width: 90%;
+  max-width: 600px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: var(--spacing-md);
+  border-bottom: 1px solid var(--border-secondary);
+  margin-bottom: var(--spacing-lg);
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.modal-body {
+  overflow-y: auto;
+  flex-grow: 1;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-md);
+  padding-top: var(--spacing-lg);
+  border-top: 1px solid var(--border-secondary);
+  margin-top: var(--spacing-lg);
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: var(--text-light);
+}
+
+.close-btn:hover {
+  color: var(--text-primary);
+}
+
+/* --- モーダル内コンテンツ --- */
+.config-group {
+  margin-bottom: var(--spacing-lg);
+}
+
+.config-group label {
+  display: block;
+  font-weight: 500;
+  margin-bottom: var(--spacing-sm);
+  color: var(--text-secondary);
+}
+
+.setting-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--spacing-lg);
+  align-items: flex-start;
+}
+
+.setting-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.readonly-input {
+  background-color: var(--bg-component);
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  color: var(--text-light);
+  cursor: not-allowed;
+}
+
+.tier-selection {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-md);
+}
+
+.tier-option {
+  border: 2px solid var(--border-secondary);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  cursor: pointer;
+  transition: all 0.2s;
+  background-color: transparent;
+  position: relative;
+}
+
+.tier-option:hover {
+  border-color: #a0a0a0;
+  background-color: var(--bg-component);
+}
+
+.tier-option input[type="radio"] {
+  display: none;
+}
+
+.tier-option:has(input[type="radio"]:checked) {
+  border-color: var(--accent-success);
+  background-color: var(--accent-success-bg);
+  box-shadow: 0 0 0 2px var(--accent-success-bg);
+}
+
+.tier-option:has(input[type="radio"]:checked) .tier-label {
+  color: var(--accent-success);
+  font-weight: 600;
+}
+
+input[type="radio"]:checked + .tier-label::before {
+  content: '🔹';
+  margin-right: var(--spacing-sm);
+}
+
+.tier-label {
+  font-weight: 500;
+  display: block;
+  margin-bottom: var(--spacing-sm);
+}
+
+.setting-cell input[type="number"] {
+  background-color: var(--bg-component-light);
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.setting-cell input[type="number"]:focus {
+  border-color: var(--accent-success);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-success-bg);
+}
+
+.setting-cell input[type="number"]:disabled {
+  background-color: var(--bg-component);
+  cursor: not-allowed;
+  color: var(--text-light);
+}
+
+.slider-setting .setting-value {
+  font-weight: 500;
+  min-width: 40px;
+  text-align: right;
+}
+
+.setting-description-inline {
+  font-size: 12px;
+  color: var(--text-light);
+  margin-left: var(--spacing-sm);
+}
+
+.toggle-control {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.slider-setting {
+  margin-top: var(--spacing-md);
+}
+
+.slider-container {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.slider-container input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 8px;
+  background: var(--bg-component);
+  border-radius: 4px;
+  outline: none;
+  opacity: 0.9;
+  transition: opacity .2s;
+}
+
+.slider-container input[type="range"]:hover {
+  opacity: 1;
+}
+
+.slider-container input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  background: var(--accent-success);
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+.slider-container input[type="range"]::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  background: var(--accent-success);
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+/* --- アイコン汎用スタイル --- */
+.icon {
+  font-size: 24px; /* 絵文字アイコン用 */
+  margin-right: 12px;
+  vertical-align: middle;
+  color: var(--text-secondary);
+  display: inline-flex; /* アイコンの垂直位置を揃える */
+  align-items: center;
+}
+
+/* SVG/IMGアイコン用スタイル */
+.icon img,
+.icon svg {
+  width: 24px;
+  height: 24px;
+  vertical-align: middle; /* 念のため */
+}
+
+/* SVGの場合は色を継承 */
+.icon svg {
+  fill: currentColor;
+}
+
+/* --- フォーム＆データ表示用レイアウト --- */
+.form-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  margin-bottom: 12px;
+  padding: 0;
+}
+
+.form-row label {
+  width: 150px;
+  text-align: right;
+  font-weight: 500;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.form-row .control {
+  flex-grow: 1;
+}
+
+/* --- Config Group (主に縦積みレイアウト用) --- */
+.config-group {
+  margin-bottom: 24px;
+}
+
+.config-group:last-child {
+  margin-bottom: 0;
+}
+
+.config-group > label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+  font-weight: 500;
+  font-size: 14px;
+}
+
+/* --- フォームコントロール (input, selectなど) --- */
+.form-row .control input[type="text"],
+.form-row .control input[type="password"],
+.form-row .control select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 16px;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-lg);
+  background-color: var(--bg-component-light);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: var(--font-family-system);
+  transition: var(--transition-fast);
+  -webkit-appearance: none; /* OSのデフォルトスタイルを無効化 */
+  appearance: none;
+}
+
+.form-row .control select {
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23343a40' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 1rem center;
+  background-size: 16px 12px;
+}
+
+.form-row .control input[type="text"]:focus,
+.form-row .control input[type="password"]:focus,
+.form-row .control select:focus {
+  outline: none;
+  border-color: var(--accent-primary-dark);
+  box-shadow: 0 0 0 3px rgba(51, 51, 51, 0.1);
+}
+
+/* --- AuthManager固有スタイル --- */
+.setup-instructions {
+  list-style: decimal inside;
+  padding-left: 0;
+  color: var(--text-light);
+  line-height: 1.6;
+}
+
+.setup-instructions li {
+  margin-bottom: var(--spacing-sm);
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: var(--accent-success); /* common.cssのカラースキームに合わせる */
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  font-size: inherit;
+  font-family: inherit;
+}
+
+.link-button:hover {
+  color: #1a6f23; /* 少し濃い緑 */
+}
+
+/* --- トグルスイッチ --- */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: .4s;
+  border-radius: 24px;
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 4px;
+  bottom: 4px;
+  background-color: white;
+  transition: .4s;
+  border-radius: 50%;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background-color: var(--accent-success);
+}
+
+.toggle-switch input:focus + .toggle-slider {
+  box-shadow: 0 0 1px var(--accent-success);
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+  transform: translateX(20px);
+}
+
+/*
+  アップロード関連コンポーネント
+*/
+
+.upload-queue, .current-uploads {
+  background: var(--bg-component);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-md);
+  border: 1px solid var(--border-secondary);
+}
+
+.queue-item, .upload-progress {
+  background: var(--bg-component-light);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+  border: 1px solid var(--border-secondary);
+}
+
+.queue-item:last-child, .upload-progress:last-child {
+  margin-bottom: 0;
+}
+
+.queue-item p, .upload-progress p {
+  margin: var(--spacing-xs) 0;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.queue-more {
+  color: var(--text-light);
+  font-style: italic;
+  text-align: center;
+  margin-top: var(--spacing-sm);
+  font-size: 12px;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background: var(--bg-component);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-top: var(--spacing-sm);
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4da9e9, var(--accent-success));
+  transition: width 0.3s ease-in-out;
+}
+
+/* --- UploadManager固有スタイル --- */
+
+.upload-drop-zone {
+  border: 2px dashed var(--border-primary);
+  border-radius: var(--radius-lg);
+  padding: 40px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  background-color: var(--bg-component);
+  margin-bottom: var(--spacing-lg);
+}
+
+.upload-drop-zone:hover {
+  border-color: var(--accent-primary-dark);
+  background-color: #e0e0e0;
+}
+
+.upload-drop-zone.drag-over {
+  border-color: var(--accent-primary-dark);
+  background-color: #dcdcdc;
+  transform: scale(1.01);
+}
+
+.drop-zone-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.upload-icon {
+  font-size: 48px;
+  opacity: 0.7;
+}
+
+.drop-zone-text p {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text-primary);
+}
+
+.drop-zone-subtext {
+  font-size: 14px;
+  color: var(--text-light);
+}
+
+.selected-files-info {
+  background: var(--bg-component);
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+}
+
+.file-stats {
+  display: flex;
+  gap: var(--spacing-lg);
+  font-size: 14px;
+  color: var(--text-light);
+}
+
+.control-buttons {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.overall-progress {
+  margin-bottom: var(--spacing-md);
+}
+
+.progress-details {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-light);
+  margin-top: var(--spacing-xs);
+}
+
+.upload-queue-container {
+  width: 100%;
+}
+
+.queue-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.item-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-xs);
+}
+
+.item-name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: var(--spacing-md);
+}
+
+.item-details {
+  font-size: 12px;
+  color: var(--text-light);
+  flex-shrink: 0;
+}
+
+.item-progress {
+  font-size: 12px;
+  color: var(--text-light);
+}
+
+.status-pending {
+  border-left: 4px solid #f0ad4e;
+}
+.status-inprogress {
+  border-left: 4px solid #5bc0de;
+}
+.status-completed {
+  border-left: 4px solid var(--accent-success);
+}
+.status-failed {
+  border-left: 4px solid var(--accent-error);
+}
+
+/* サイドバー */
+.config-tabs {
+  flex: 1;
+  padding: 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* タブ */
+.tab {
+  background: none;
+  border: none;
+  padding: 12px 20px;
+  color: rgb(0, 0, 0);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 400;
+  border-right: 3px solid transparent;
+  transition: all 0.2s ease;
+  text-align: left;
+  border-radius: 0 8px 8px 0;
+  margin: 0 8px 0 0;
+  display: flex;
+  align-items: center;
+}
+
+.tab-icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  filter: grayscale(100%) brightness(0.4);
+  transition: filter 0.2s ease;
+}
+
+.tab:hover {
+  color: rgb(0, 0, 0);
+  background: rgb(213, 214, 215);
+}
+
+.tab:hover .tab-icon {
+  filter: grayscale(100%) brightness(0.2);
+}
+
+.tab.active {
+  color: rgb(0, 0, 0);
+  background: rgb(213, 214, 215);
+  border-right-color: rgb(0, 0, 0);
+}
+
+.tab.active .tab-icon {
+  filter: grayscale(100%) brightness(0);
+}
+
+/* アプリ情報（左下） */
+.app-info {
+  padding: 20px;
+  margin-top: auto;
+}
+
+.app-name {
+  font-size: 17px;
+  font-weight: 600;
+  color: rgb(0, 0, 0);
+  margin-bottom: 4px;
+  letter-spacing: -0.2px;
+}
+
+.app-subtitle {
+  font-size: 12px;
+  color: rgb(0, 0, 0);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.app-copyright {
+  font-size: 11px;
+  color: rgb(0, 0, 0);
+  opacity: 0.7;
+} 

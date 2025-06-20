@@ -1,5 +1,4 @@
 import React from 'react';
-import './ConfigManager.css'; // スタイルは共有
 import { isDev } from '../utils/debug';
 
 // アイコンのインポート
