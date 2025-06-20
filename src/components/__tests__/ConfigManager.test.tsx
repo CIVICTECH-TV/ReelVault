@@ -4,6 +4,12 @@ import { vi, describe, it, expect, beforeEach, afterEach, beforeAll } from 'vite
 import { ConfigManager } from '../ConfigManager';
 import * as TauriCommands from '../../services/tauriCommands';
 import * as debugUtils from '../../utils/debug';
+import { getVersion } from '@tauri-apps/api/app';
+
+// getVersionのモック
+vi.mock('@tauri-apps/api/app', () => ({
+  getVersion: vi.fn(),
+}));
 
 // isDevのモック
 vi.mock('../../utils/debug', () => ({
@@ -119,6 +125,8 @@ describe('ConfigManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(debugUtils.isDev).mockReturnValue(true);
+    // getVersionのモックを設定
+    vi.mocked(getVersion).mockResolvedValue('0.1.0');
     // TauriCommandsの存在するメソッドのみをモック
     vi.mocked(TauriCommands.TauriCommands.getConfig).mockResolvedValue(dummyAppConfig);
     vi.mocked(TauriCommands.TauriCommands.getAppState).mockResolvedValue(dummyAppState);
@@ -1228,6 +1236,33 @@ describe('ConfigManager', () => {
     // エラーメッセージが表示されることを確認
     await waitFor(() => {
       expect(screen.getByText(/API失敗/)).toBeInTheDocument();
+    });
+  });
+
+  it('should display app version correctly', async () => {
+    // getVersionのモック
+    vi.mocked(getVersion).mockResolvedValue('0.1.0');
+    
+    render(<ConfigManager {...defaultProps} />);
+    
+    // バージョンが表示されることを確認
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('0.1.0')).toBeInTheDocument();
+    });
+    
+    // アプリ名にバージョンが含まれることを確認
+    expect(screen.getByText(/ReelVault v0\.1\.0/)).toBeInTheDocument();
+  });
+
+  it('should handle version loading error', async () => {
+    // getVersionのエラーモック
+    vi.mocked(getVersion).mockRejectedValue(new Error('Version error'));
+    
+    render(<ConfigManager {...defaultProps} />);
+    
+    // エラー時に「不明」が表示されることを確認
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('不明')).toBeInTheDocument();
     });
   });
 }); 
