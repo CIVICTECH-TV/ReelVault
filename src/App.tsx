@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { listen } from '@tauri-apps/api/event';
-import { TauriCommands, AppConfig, AppState } from "./types/tauri-commands";
+import { TauriCommands, AppConfig, AppState } from "./services/tauriCommands";
 import { ConfigManager, ConfigManagerRef } from "./components/ConfigManager";
 import "./App.css";
 
@@ -81,7 +81,7 @@ function App() {
 
   const handleAuthSuccess = () => {
     // 認証成功時に状態を再読み込み
-    TauriCommands.getAppState().then(setAppState);
+    TauriCommands.getAppState().then(setAppState).catch(() => {});
   };
 
   const handleHealthStatusChange = (status: { isHealthy: boolean; lastCheck: Date | null; bucketName: string | undefined }) => {

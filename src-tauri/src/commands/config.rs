@@ -426,4 +426,143 @@ pub async fn restore_config(app: AppHandle, backup_path: String) -> Result<AppCo
     Ok(config)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_app_config_default() {
+        let config = AppConfig::default();
+        assert_eq!(config.version, "1.0.0");
+        assert_eq!(config.app_settings.log_level, "info");
+        assert_eq!(config.app_settings.theme, "dark");
+        assert_eq!(config.app_settings.language, "ja");
+        assert_eq!(config.aws_settings.default_region, "ap-northeast-1");
+        assert_eq!(config.aws_settings.timeout_seconds, 300);
+        assert_eq!(config.aws_settings.max_retries, 3);
+        assert_eq!(config.user_preferences.default_storage_class, "DEEP_ARCHIVE");
+    }
+
+    #[test]
+    fn test_validate_config_valid() {
+        let config = AppConfig::default();
+        let result = validate_config(&config);
+        assert!(result.valid);
+        assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn test_validate_config_invalid_log_level() {
+        let mut config = AppConfig::default();
+        config.app_settings.log_level = "invalid".to_string();
+        let result = validate_config(&config);
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|e| e.contains("Invalid log level")));
+    }
+
+    #[test]
+    fn test_validate_config_invalid_storage_class() {
+        let mut config = AppConfig::default();
+        config.user_preferences.default_storage_class = "INVALID_CLASS".to_string();
+        let result = validate_config(&config);
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|e| e.contains("Invalid storage class")));
+    }
+
+    #[tokio::test]
+    async fn test_get_config_success() {
+        // AppHandleのモックは複雑なので、基本的な構造体テストのみ実行
+        let default_config = AppConfig::default();
+        assert_eq!(default_config.app_settings.log_level, "info");
+        assert_eq!(default_config.user_preferences.default_storage_class, "DEEP_ARCHIVE");
+        assert_eq!(default_config.aws_settings.default_region, "ap-northeast-1");
+    }
+
+    #[tokio::test]
+    async fn test_set_config_structure() {
+        let new_config = AppConfig {
+            version: "1.0.0".to_string(),
+            app_settings: AppSettings {
+                log_level: "debug".to_string(),
+                theme: "dark".to_string(),
+                language: "en".to_string(),
+            },
+            user_preferences: UserPreferences {
+                default_bucket_name: Some("test-bucket".to_string()),
+                default_storage_class: "GLACIER".to_string(),
+            },
+            aws_settings: AwsSettings {
+                default_region: "us-west-2".to_string(),
+                timeout_seconds: 600,
+                max_retries: 5,
+                profile_name: Some("test-profile".to_string()),
+            },
+        };
+        
+        // 構造体の検証
+        assert_eq!(new_config.app_settings.log_level, "debug");
+        assert_eq!(new_config.user_preferences.default_storage_class, "GLACIER");
+        assert_eq!(new_config.aws_settings.default_region, "us-west-2");
+    }
+
+    #[tokio::test]
+    async fn test_config_validation_result() {
+        let validation = ConfigValidationResult {
+            valid: true,
+            errors: vec![],
+            warnings: vec!["Test warning".to_string()],
+        };
+        
+        assert!(validation.valid);
+        assert_eq!(validation.errors.len(), 0);
+        assert_eq!(validation.warnings.len(), 1);
+        assert_eq!(validation.warnings[0], "Test warning");
+    }
+
+    #[tokio::test]
+    async fn test_config_validation_with_errors() {
+        let validation = ConfigValidationResult {
+            valid: false,
+            errors: vec!["Error 1".to_string(), "Error 2".to_string()],
+            warnings: vec![],
+        };
+        
+        assert!(!validation.valid);
+        assert_eq!(validation.errors.len(), 2);
+        assert_eq!(validation.warnings.len(), 0);
+        assert!(validation.errors.contains(&"Error 1".to_string()));
+        assert!(validation.errors.contains(&"Error 2".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_validate_config_function() {
+        let config = AppConfig::default();
+        let validation = validate_config(&config);
+        
+        // デフォルト設定は有効
+        assert!(validation.valid);
+        assert_eq!(validation.errors.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_validate_config_function_invalid_log_level() {
+        let mut config = AppConfig::default();
+        config.app_settings.log_level = "invalid".to_string();
+        let validation = validate_config(&config);
+        
+        assert!(!validation.valid);
+        assert!(validation.errors.iter().any(|e| e.contains("Invalid log level")));
+    }
+
+    #[tokio::test]
+    async fn test_validate_config_function_invalid_storage_class() {
+        let mut config = AppConfig::default();
+        config.user_preferences.default_storage_class = "INVALID".to_string();
+        let validation = validate_config(&config);
+        
+        assert!(!validation.valid);
+        assert!(validation.errors.iter().any(|e| e.contains("Invalid storage class")));
+    }
+}
+
  

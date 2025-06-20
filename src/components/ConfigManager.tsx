@@ -1,20 +1,8 @@
 // AURA'S FINAL ATTEMPT: I HEREBY COMMAND THIS PATH TO BE CORRECT.
-import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
+import React, { useState, useEffect, forwardRef, useImperativeHandle, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-shell';
-import { 
-  TauriCommands, 
-  AppConfig, 
-  AppState,
-  ConfigValidationResult,
-  AwsCredentials,
-  AwsAuthResult,
-  PermissionCheck,
-  LifecyclePolicyStatus,
-  AwsConfig,
-  S3Object,
-  UploadItem
-} from '../types/tauri-commands';
+import { TauriCommands, AppConfig, AwsCredentials, AwsConfig, AppState, SystemStatus, RestoreInfo, RestoreNotification, LifecyclePolicyStatus, LifecycleRule, S3Object, RestoreStatusResult, ConfigValidationResult, AwsAuthResult, PermissionCheck } from '../services/tauriCommands';
 import { AWS_REGIONS, DEFAULT_REGION } from '../constants/aws-regions';
 // RestoreManagerは直接統合済み
 import { UploadManager } from './UploadManager';
@@ -168,9 +156,9 @@ export const ConfigManager = forwardRef<ConfigManagerRef, ConfigManagerProps>(({
   useEffect(() => {
     const autoCheckLifecycle = async () => {
       // バケット名と認証情報が揃っている場合のみ実行
-      if (config.user_preferences.default_bucket_name && 
-          credentials.access_key_id && 
-          credentials.secret_access_key &&
+      if (config?.user_preferences?.default_bucket_name && 
+          credentials?.access_key_id && 
+          credentials?.secret_access_key &&
           !isLifecycleLoading) {
         
         console.log('自動ライフサイクル状況チェック開始:', config.user_preferences.default_bucket_name);
@@ -192,7 +180,7 @@ export const ConfigManager = forwardRef<ConfigManagerRef, ConfigManagerProps>(({
     const timeoutId = setTimeout(autoCheckLifecycle, 1000);
     
     return () => clearTimeout(timeoutId);
-  }, [config.user_preferences.default_bucket_name, credentials.access_key_id, credentials.secret_access_key]);
+  }, [config?.user_preferences?.default_bucket_name, credentials?.access_key_id, credentials?.secret_access_key]);
 
   // 定期健全性監視（5分間隔）
   useEffect(() => {
@@ -202,9 +190,9 @@ export const ConfigManager = forwardRef<ConfigManagerRef, ConfigManagerProps>(({
     }
 
     // バケットが設定されている場合のみ定期監視を開始
-    if (config.user_preferences.default_bucket_name && 
-        credentials.access_key_id && 
-        credentials.secret_access_key) {
+    if (config?.user_preferences?.default_bucket_name && 
+        credentials?.access_key_id && 
+        credentials?.secret_access_key) {
       
       console.log('ライフサイクル定期監視を開始（5分間隔）');
       
@@ -220,7 +208,7 @@ export const ConfigManager = forwardRef<ConfigManagerRef, ConfigManagerProps>(({
         setHealthCheckInterval(null);
       };
     }
-  }, [config.user_preferences.default_bucket_name, credentials.access_key_id, credentials.secret_access_key]);
+  }, [config?.user_preferences?.default_bucket_name, credentials?.access_key_id, credentials?.secret_access_key]);
 
   // アプリ終了時のクリーンアップ
   useEffect(() => {
@@ -237,10 +225,10 @@ export const ConfigManager = forwardRef<ConfigManagerRef, ConfigManagerProps>(({
       onHealthStatusChange({
         isHealthy: isLifecycleHealthy,
         lastCheck: lastHealthCheck,
-        bucketName: config.user_preferences.default_bucket_name
+        bucketName: config?.user_preferences?.default_bucket_name
       });
     }
-  }, [isLifecycleHealthy, lastHealthCheck, config.user_preferences.default_bucket_name]);
+  }, [isLifecycleHealthy, lastHealthCheck, config?.user_preferences?.default_bucket_name, onHealthStatusChange]);
 
 
 
@@ -741,9 +729,15 @@ export const ConfigManager = forwardRef<ConfigManagerRef, ConfigManagerProps>(({
       const status = await TauriCommands.getLifecycleStatus(awsConfig);
       console.log('Lifecycle status received:', status);
       setLifecycleStatus(status);
+      // エラーをクリア
+      setError(null);
     } catch (err) {
       console.error('Error checking lifecycle status:', err);
-      console.error('ライフサイクル状況の取得に失敗しました:', err instanceof Error ? err.message : 'Unknown error');
+      const errorMessage = 'ライフサイクル状況の取得に失敗しました';
+      console.error(errorMessage, err instanceof Error ? err.message : 'Unknown error');
+      // エラーメッセージをUIに表示
+      setError(errorMessage);
+      setLifecycleStatus(null);
     } finally {
       setIsLifecycleLoading(false);
     }
@@ -885,13 +879,13 @@ export const ConfigManager = forwardRef<ConfigManagerRef, ConfigManagerProps>(({
   // リストアタブ開いた時の自動S3オブジェクト取得
   useEffect(() => {
     if (activeTab === 'restore' && 
-        config.user_preferences.default_bucket_name && 
-        credentials.access_key_id && 
-        s3Objects.length === 0 && 
+        config?.user_preferences?.default_bucket_name && 
+        credentials?.access_key_id && 
+        s3Objects?.length === 0 && 
         !isLoadingS3Objects) {
       loadS3Objects();
     }
-  }, [activeTab, config.user_preferences.default_bucket_name, credentials.access_key_id]);
+  }, [activeTab, config?.user_preferences?.default_bucket_name, credentials?.access_key_id]);
 
   // ファイル選択ハンドラー
   // const handleFileSelection = (fileKey: string, isSelected: boolean) => {
@@ -1789,7 +1783,7 @@ export const ConfigManager = forwardRef<ConfigManagerRef, ConfigManagerProps>(({
                   </button>
                   <button
                     onClick={checkRestoreStatus}
-                    disabled={s3Objects.length === 0}
+                    disabled={s3Objects?.length === 0}
                     className="btn-secondary check-restore-btn"
                   >
                     🔍 復元状況確認
@@ -1823,14 +1817,14 @@ export const ConfigManager = forwardRef<ConfigManagerRef, ConfigManagerProps>(({
                 </div>
               )}
 
-              {config.user_preferences.default_bucket_name && credentials.access_key_id && s3Objects.length > 0 && (
+              {config.user_preferences.default_bucket_name && credentials.access_key_id && s3Objects?.length > 0 && (
                 <div className="file-browser">
                   {/* ファイルブラウザーツールバー */}
                   <div className="file-browser-toolbar">
                     <div className="selection-info">
                       <span className="object-count">
-                        全ファイル: {s3Objects.length}個 | 
-                        Deep Archive: {s3Objects.filter(obj => obj.storage_class === 'DEEP_ARCHIVE').length}個
+                        全ファイル: {s3Objects?.length}個 | 
+                        Deep Archive: {s3Objects?.filter(obj => obj.storage_class === 'DEEP_ARCHIVE').length}個
                       </span>
                       <span className="selection-count">
                         {selectedFiles.length > 0 && `${selectedFiles.length}個選択中`}
@@ -2012,7 +2006,7 @@ export const ConfigManager = forwardRef<ConfigManagerRef, ConfigManagerProps>(({
                       </tbody>
                     </table>
                     
-                    {s3Objects.length === 0 && (
+                    {s3Objects?.length === 0 && (
                       <div className="empty-state">
                         <p>ファイルが見つかりませんでした。</p>
                       </div>
@@ -2181,9 +2175,10 @@ export const ConfigManager = forwardRef<ConfigManagerRef, ConfigManagerProps>(({
                 </div>
               )}
 
-              {s3Objects.length === 0 && !isLoadingS3Objects && config.user_preferences.default_bucket_name && credentials.access_key_id && (
+              {s3Objects?.length === 0 && !isLoadingS3Objects && config.user_preferences.default_bucket_name && credentials.access_key_id && (
                 <div className="empty-state">
-                  <p>S3オブジェクトが見つかりません。上記のボタンでオブジェクト一覧を取得してください。</p>
+                  <p>📁 S3オブジェクトがありません</p>
+                  <p>バケットが空か、アクセス権限がありません</p>
                 </div>
               )}
             </div>

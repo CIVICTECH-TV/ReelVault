@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import { listen } from '@tauri-apps/api/event';
-import { TauriCommands, UploadItem, UploadStatus, UploadStatistics, FileSelection, UploadConfig, AwsCredentials, UploadProgressInfo } from '../types/tauri-commands';
+import { TauriCommands, UploadItem, UploadStatus, UploadStatistics, FileSelection, UploadConfig, AwsCredentials, UploadProgressInfo } from '../services/tauriCommands';
 import { debugLog, isDev, debugError, debugWarn, debugInfo } from '../utils/debug';
 import './UploadManager.css';
 
@@ -279,8 +279,8 @@ export const UploadManager: React.FC<UploadManagerProps> = ({
 
     return () => {
       console.log('🎧 進捗リスナーを解除中...');
-      unlisten.then(f => f());
-      testUnlisten.then(f => f());
+      if (unlisten && typeof unlisten.then === 'function') unlisten.then(f => f && typeof f === 'function' && f());
+      if (testUnlisten && typeof testUnlisten.then === 'function') testUnlisten.then(f => f && typeof f === 'function' && f());
     };
   }, [uploadConfig]); // uploadConfigに依存
 

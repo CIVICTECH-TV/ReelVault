@@ -6,6 +6,7 @@ use tauri::command;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher, Config, Event, EventKind};
 use std::collections::HashMap;
 use crate::internal::{InternalError, standardize_error};
+use uuid::Uuid;
 
 /// ファイル情報を表す構造体
 #[derive(Debug, Serialize, Deserialize)]
@@ -672,5 +673,283 @@ mod tests {
         assert!(should_exclude_file(&backup_file, &config));
         assert!(should_exclude_file(&thumbs_file, &config));
         assert!(!should_exclude_file(&normal_file, &config));
+    }
+
+    #[test]
+    fn test_should_exclude_file_empty_patterns() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        
+        // 空のパターン配列でテスト
+        let config = WatchConfig {
+            path: temp_dir.path().to_str().unwrap().to_string(),
+            recursive: true,
+            file_patterns: vec![], // 空のパターン配列
+            max_file_size_mb: Some(100),
+            auto_upload: true,
+            exclude_patterns: vec![], // 空の除外パターン配列
+            exclude_directories: vec![],
+            auto_metadata: true,
+        };
+        
+        let test_file = temp_dir.path().join("test.mp4");
+        fs::write(&test_file, "test content").unwrap();
+        
+        // 空のパターン配列の場合、パターンチェックがスキップされるため除外されない
+        assert!(!should_exclude_file(&test_file, &config));
+        
+        // 除外パターンだけ設定した場合
+        let mut config_with_exclude = config.clone();
+        config_with_exclude.exclude_patterns = vec!["*.tmp".to_string()];
+        
+        let tmp_file = temp_dir.path().join("test.tmp");
+        fs::write(&tmp_file, "tmp content").unwrap();
+        
+        // 除外パターンに一致するファイルは除外される
+        assert!(should_exclude_file(&tmp_file, &config_with_exclude));
+        // 除外パターンに一致しないファイルは除外されない（file_patternsが空なのでパターンチェックはスキップ）
+        assert!(!should_exclude_file(&test_file, &config_with_exclude));
+    }
+
+    #[tokio::test]
+    async fn test_list_files_success() {
+        // UUID付きテストディレクトリで並列衝突防止
+        let home_dir = dirs::home_dir().unwrap();
+        let test_dir = home_dir.join(format!("test_file_operations_{}", Uuid::new_v4()));
+        
+        // 既存のテストディレクトリがあれば削除
+        if test_dir.exists() {
+            let _ = fs::remove_dir_all(&test_dir);
+        }
+        
+        // テストディレクトリを作成
+        fs::create_dir_all(&test_dir).unwrap();
+        
+        // テストファイルを作成（1つだけ）
+        fs::write(test_dir.join("test.txt"), "test content").unwrap();
+        
+        let directory = test_dir.to_str().unwrap().to_string();
+        let result = list_files(directory).await;
+        
+        // クリーンアップ（再帰的に削除）
+        let _ = fs::remove_dir_all(&test_dir); // エラーを無視
+        
+        assert!(result.is_ok());
+        let files = result.unwrap();
+        
+        // 最低1つのファイルがあることを確認
+        assert!(files.len() >= 1);
+        
+        // 作成したファイルが見つかることを確認
+        let test_file = files.iter().find(|f| f.name == "test.txt");
+        assert!(test_file.is_some(), "test.txt not found in files: {:?}", files.iter().map(|f| &f.name).collect::<Vec<_>>());
+        let test_file = test_file.unwrap();
+        assert_eq!(test_file.name, "test.txt");
+        assert!(test_file.path.contains("test.txt"));
+        assert!(test_file.size > 0);
+        assert!(!test_file.is_directory);
+        assert_eq!(test_file.extension, Some("txt".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_list_files_invalid_directory() {
+        let invalid_path = "/nonexistent/directory/that/should/not/exist".to_string();
+        let result = list_files(invalid_path).await;
+        
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err();
+        assert!(error_msg.contains("File operation error") || error_msg.contains("No such file or directory"));
+    }
+
+    #[tokio::test]
+    async fn test_get_file_info_success() {
+        // UUID付きテストディレクトリで並列衝突防止
+        let home_dir = dirs::home_dir().unwrap();
+        let test_dir = home_dir.join(format!("test_file_operations_{}", Uuid::new_v4()));
+        
+        // 既存のテストディレクトリがあれば削除
+        if test_dir.exists() {
+            let _ = fs::remove_dir_all(&test_dir);
+        }
+        
+        fs::create_dir_all(&test_dir).unwrap();
+        
+        let test_file = test_dir.join("test.txt");
+        fs::write(&test_file, "test content").unwrap();
+        
+        let file_path = test_file.to_str().unwrap().to_string();
+        let result = get_file_info(file_path).await;
+        
+        // クリーンアップ（再帰的に削除）
+        let _ = fs::remove_dir_all(&test_dir); // エラーを無視
+        
+        assert!(result.is_ok());
+        let file_info = result.unwrap();
+        
+        assert_eq!(file_info.name, "test.txt");
+        assert!(file_info.path.contains("test.txt"));
+        assert!(file_info.size > 0);
+        assert!(!file_info.is_directory);
+        assert_eq!(file_info.extension, Some("txt".to_string()));
+        assert!(!file_info.modified.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_file_info_nonexistent_file() {
+        let nonexistent_path = "/nonexistent/file.txt".to_string();
+        let result = get_file_info(nonexistent_path).await;
+        
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err();
+        assert!(error_msg.contains("File operation error") || error_msg.contains("No such file or directory"));
+    }
+
+    #[tokio::test]
+    async fn test_get_sample_watch_configs() {
+        let result = get_sample_watch_configs().await;
+        
+        assert!(result.is_ok());
+        let configs = result.unwrap();
+        
+        // サンプル設定が3つ作成されることを確認
+        assert_eq!(configs.len(), 3);
+        
+        // 各設定の基本構造を確認
+        for config in &configs {
+            assert!(!config.path.is_empty());
+            assert!(!config.file_patterns.is_empty());
+            assert!(config.max_file_size_mb.is_some());
+        }
+        
+        // 最初の設定（非再帰的）を確認
+        assert!(!configs[0].recursive);
+        assert!(!configs[0].auto_upload);
+        assert!(configs[0].auto_metadata);
+        
+        // 2番目の設定（再帰的、自動アップロード）を確認
+        assert!(configs[1].recursive);
+        assert!(configs[1].auto_upload);
+        assert!(configs[1].auto_metadata);
+    }
+
+    #[tokio::test]
+    async fn test_get_file_info_attributes_validation() {
+        // UUID付きテストディレクトリで並列衝突防止
+        let home_dir = dirs::home_dir().unwrap();
+        let test_dir = home_dir.join(format!("test_file_operations_{}", Uuid::new_v4()));
+        
+        // 既存のテストディレクトリがあれば削除
+        if test_dir.exists() {
+            let _ = fs::remove_dir_all(&test_dir);
+        }
+        
+        fs::create_dir_all(&test_dir).unwrap();
+        
+        // 拡張子なしファイルを作成
+        let no_ext_file = test_dir.join("testfile");
+        fs::write(&no_ext_file, "test content").unwrap();
+        
+        // 隠しファイルを作成
+        let hidden_file = test_dir.join(".hidden");
+        fs::write(&hidden_file, "hidden content").unwrap();
+        
+        // 拡張子なしファイルの検証
+        let no_ext_path = no_ext_file.to_str().unwrap().to_string();
+        let result = get_file_info(no_ext_path).await;
+        
+        assert!(result.is_ok());
+        let file_info = result.unwrap();
+        
+        assert_eq!(file_info.name, "testfile");
+        assert!(file_info.path.contains("testfile"));
+        assert!(file_info.size > 0);
+        assert!(!file_info.is_directory);
+        assert_eq!(file_info.extension, None); // 拡張子なし
+        assert!(!file_info.modified.is_empty());
+        assert_ne!(file_info.modified, "Unknown"); // modifiedが"Unknown"でないことを確認
+        
+        // 隠しファイルの検証
+        let hidden_path = hidden_file.to_str().unwrap().to_string();
+        let result = get_file_info(hidden_path).await;
+        
+        assert!(result.is_ok());
+        let file_info = result.unwrap();
+        
+        assert_eq!(file_info.name, ".hidden");
+        assert!(file_info.path.contains(".hidden"));
+        assert!(file_info.size > 0);
+        assert!(!file_info.is_directory);
+        assert_eq!(file_info.extension, None); // 隠しファイルは拡張子なし
+        assert!(!file_info.modified.is_empty());
+        assert_ne!(file_info.modified, "Unknown"); // modifiedが"Unknown"でないことを確認
+        
+        // クリーンアップ（再帰的に削除）
+        let _ = fs::remove_dir_all(&test_dir); // エラーを無視
+    }
+
+    #[tokio::test]
+    async fn test_get_file_info_permission_error() {
+        // UUID付きテストディレクトリで並列衝突防止
+        let home_dir = dirs::home_dir().unwrap();
+        let test_dir = home_dir.join(format!("test_file_operations_{}", Uuid::new_v4()));
+        
+        // 既存のテストディレクトリがあれば削除
+        if test_dir.exists() {
+            let _ = fs::remove_dir_all(&test_dir);
+        }
+        
+        fs::create_dir_all(&test_dir).unwrap();
+        
+        // 読み取り不可ファイルを作成
+        let readonly_file = test_dir.join("readonly.txt");
+        fs::write(&readonly_file, "readonly content").unwrap();
+        
+        // ファイルの権限を000に変更（読み取り不可）
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&readonly_file).unwrap().permissions();
+            perms.set_mode(0o000); // 読み取り・書き込み・実行権限を全て削除
+            fs::set_permissions(&readonly_file, perms).unwrap();
+        }
+        
+        let readonly_path = readonly_file.to_str().unwrap().to_string();
+        let result = get_file_info(readonly_path).await;
+        
+        // 権限を元に戻してからクリーンアップ
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&readonly_file).unwrap().permissions();
+            perms.set_mode(0o644); // 通常の権限に戻す
+            fs::set_permissions(&readonly_file, perms).unwrap();
+        }
+        
+        // クリーンアップ（再帰的に削除）
+        let _ = fs::remove_dir_all(&test_dir); // エラーを無視
+        
+        // Unix系では権限エラー、Windowsでは成功する可能性がある
+        #[cfg(unix)]
+        {
+            // macOSではファイル所有者であれば権限000でも読み取り可能な場合がある
+            if result.is_err() {
+                let error_msg = result.unwrap_err();
+                assert!(error_msg.contains("Permission denied") || error_msg.contains("Access denied"));
+            } else {
+                // 権限エラーが発生しなくても、ファイル情報が正しく取得できればOK
+                let file_info = result.unwrap();
+                assert_eq!(file_info.name, "readonly.txt");
+                assert!(file_info.size > 0);
+            }
+        }
+        
+        #[cfg(windows)]
+        {
+            // Windowsでは権限エラーが発生しない可能性があるため、成功してもOK
+            if result.is_ok() {
+                let file_info = result.unwrap();
+                assert_eq!(file_info.name, "readonly.txt");
+                assert!(file_info.size > 0);
+            }
+        }
     }
 } 

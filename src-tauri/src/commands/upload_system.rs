@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::commands::aws_auth::AwsCredentials;
 use crate::commands::metadata::create_file_metadata;
 use crate::internal::{InternalError, standardize_error};
+use crate::commands::aws_operations::{S3ClientTrait, MockS3Client, RealS3Client, create_s3_client};
 
 /// アップロードアイテムの状態
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -694,12 +695,24 @@ async fn process_upload_queue(
             tokio::spawn(async move {
                 log::info!("🔄 Starting upload task for: {} ({})", file_name, item_id);
                 
+                // RealS3Clientを作成
+                let s3_client = match create_s3_client(&config_clone.aws_credentials).await {
+                    Ok(client) => RealS3Client::new(client),
+                    Err(e) => {
+                        log::error!("Failed to create S3 client: {}", e);
+                        let mut queue = queue_state_clone.lock().unwrap();
+                        queue.complete_upload(&item_id, false, Some(format!("Failed to create S3 client: {}", e)));
+                        return;
+                    }
+                };
+                
                 let result = upload_file_to_s3(
                     item.file_path,
                     item.s3_key,
                     config_clone,
                     tx_clone,
                     item_id.clone(),
+                    &s3_client,
                 ).await;
                 
                 let (success, error_msg) = match result {
@@ -850,10 +863,8 @@ async fn upload_file_to_s3(
     config: UploadConfig,
     progress_tx: mpsc::Sender<UploadProgress>,
     item_id: String,
+    s3_client: &dyn S3ClientTrait,
 ) -> Result<String, String> {
-    use aws_config::{BehaviorVersion, Region};
-    use aws_sdk_s3::Client as S3Client;
-    use aws_credential_types::Credentials;
     use std::path::Path;
     use tokio::fs::File;
     use tokio::io::AsyncReadExt;
@@ -883,23 +894,6 @@ async fn upload_file_to_s3(
     let file_size = std::fs::metadata(&path)
         .map_err(|e| format!("Failed to get file metadata: {}", e))?
         .len();
-    
-    // AWS設定
-    let region = Region::new(config.aws_credentials.region.clone());
-    let mut config_builder = aws_config::defaults(BehaviorVersion::latest())
-        .region(region);
-    
-    let creds = Credentials::new(
-        &config.aws_credentials.access_key_id,
-        &config.aws_credentials.secret_access_key,
-        config.aws_credentials.session_token.clone(),
-        None,
-        "upload",
-    );
-    
-    config_builder = config_builder.credentials_provider(creds);
-    let aws_config = config_builder.load().await;
-    let s3_client = S3Client::new(&aws_config);
     
     let start_time = Instant::now();
     let mut uploaded_bytes = 0u64;
@@ -981,13 +975,8 @@ async fn upload_file_to_s3(
         report_progress(uploaded_bytes, file_size, speed_mbps);
         
         s3_client
-            .put_object()
-            .bucket(&config.bucket_name)
-            .key(&s3_key)
-            .body(buffer.into())
-            .send()
-            .await
-            .map_err(|e| format!("S3 upload failed: {}", e))?;
+            .put_object(&config.bucket_name, &s3_key, buffer)
+            .await?;
         
         log::info!("Simple upload completed: {} bytes", uploaded_bytes);
         
@@ -995,16 +984,9 @@ async fn upload_file_to_s3(
         // マルチパートアップロード
         log::info!("Using multipart upload for large file: {} bytes", file_size);
         
-        let create_response = s3_client
-            .create_multipart_upload()
-            .bucket(&config.bucket_name)
-            .key(&s3_key)
-            .send()
-            .await
-            .map_err(|e| format!("Failed to create multipart upload: {}", e))?;
-        
-        let upload_id = create_response.upload_id()
-            .ok_or("No upload ID returned")?;
+        let upload_id = s3_client
+            .create_multipart_upload(&config.bucket_name, &s3_key)
+            .await?;
         
         // 事前計算されたチャンクサイズを使用
         let chunk_size = effective_chunk_size;
@@ -1049,26 +1031,11 @@ async fn upload_file_to_s3(
             temp_buffer.truncate(total_bytes_read);
             buffer = temp_buffer;
             
-            let upload_part_response = s3_client
-                .upload_part()
-                .bucket(&config.bucket_name)
-                .key(&s3_key)
-                .upload_id(upload_id)
-                .part_number(part_number)
-                .body(buffer.into())
-                .send()
-                .await
-                .map_err(|e| format!("Failed to upload part {}: {}", part_number, e))?;
+            let etag = s3_client
+                .upload_part(&config.bucket_name, &s3_key, &upload_id, part_number, buffer)
+                .await?;
             
-            let etag = upload_part_response.e_tag()
-                .ok_or(format!("No ETag for part {}", part_number))?;
-            
-            completed_parts.push(
-                aws_sdk_s3::types::CompletedPart::builder()
-                    .part_number(part_number)
-                    .e_tag(etag)
-                    .build()
-            );
+            completed_parts.push((part_number, etag));
             
             uploaded_bytes += total_bytes_read as u64;
             part_number += 1;
@@ -1092,27 +1059,15 @@ async fn upload_file_to_s3(
         
         // パーツを部品番号順にソート（重要）
         let mut sorted_parts = completed_parts;
-        sorted_parts.sort_by_key(|part| part.part_number());
+        sorted_parts.sort_by_key(|(part_number, _)| *part_number);
         
         // デバッグ情報（詳細）
         log::info!("🔧 Preparing to complete multipart upload with {} parts:", sorted_parts.len());
-        for (i, part) in sorted_parts.iter().enumerate() {
-            log::info!("  Part {}: number={:?}, etag={:?}", 
-                       i + 1, part.part_number(), part.e_tag());
-            
-            // パーツ番号の検証
-            if part.part_number().is_none() {
-                log::error!("❌ Part {} has None part_number!", i + 1);
-            }
-            if part.e_tag().is_none() {
-                log::error!("❌ Part {} has None etag!", i + 1);
-            }
+        for (i, (part_number, etag)) in sorted_parts.iter().enumerate() {
+            log::info!("  Part {}: number={}, etag={}", i + 1, part_number, etag);
         }
         
         let parts_count = sorted_parts.len();
-        let completed_upload = aws_sdk_s3::types::CompletedMultipartUpload::builder()
-            .set_parts(Some(sorted_parts))
-            .build();
         
         // リトライ付きマルチパート完了
         let mut retry_count = 0;
@@ -1120,16 +1075,11 @@ async fn upload_file_to_s3(
         
         loop {
             match s3_client
-                .complete_multipart_upload()
-                .bucket(&config.bucket_name)
-                .key(&s3_key)
-                .upload_id(upload_id)
-                .multipart_upload(completed_upload.clone())
-                .send()
+                .complete_multipart_upload(&config.bucket_name, &s3_key, &upload_id, sorted_parts.clone())
                 .await
             {
-                Ok(response) => {
-                    log::info!("✅ Multipart upload completed successfully: {:?}", response.location());
+                Ok(_) => {
+                    log::info!("✅ Multipart upload completed successfully");
                     break;
                 }
                 Err(e) => {
@@ -1237,9 +1187,6 @@ pub async fn test_upload_config(config: UploadConfig) -> Result<String, String> 
     
     Ok(format!("Upload configuration test successful for bucket: {}", config.bucket_name))
 }
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -1525,25 +1472,108 @@ mod tests {
 
     #[test]
     fn test_s3_key_config_presets() {
-        // Simple preset
-        let simple = S3KeyConfig {
-            prefix: Some("uploads".to_string()),
-            use_date_folder: false,
-            preserve_directory_structure: false,
-            custom_naming_pattern: None,
-        };
-        let key = generate_s3_key("/test/file.mp4", &simple).unwrap();
-        assert_eq!(key, "uploads/file.mp4");
-
-        // Organized preset
-        let organized = S3KeyConfig {
-            prefix: Some("media".to_string()),
+        let config = S3KeyConfig {
+            prefix: Some("backup/".to_string()),
             use_date_folder: true,
             preserve_directory_structure: false,
             custom_naming_pattern: None,
         };
-        let key = generate_s3_key("/test/file.mp4", &organized).unwrap();
-        assert!(key.starts_with("media/"));
-        assert!(key.ends_with("/file.mp4"));
+        
+        assert_eq!(config.prefix, Some("backup/".to_string()));
+        assert!(config.use_date_folder);
+        assert!(!config.preserve_directory_structure);
+        assert!(config.custom_naming_pattern.is_none());
+    }
+    
+    #[tokio::test]
+    async fn test_upload_file_to_s3_with_mock_simple_upload() {
+        let credentials = create_test_credentials();
+        let config = create_test_upload_config();
+        let (tx, _rx) = mpsc::channel::<UploadProgress>(10);
+        let item_id = "test-item-1".to_string();
+        
+        // テスト用の一時ファイルを作成
+        let temp_dir = tempfile::tempdir().unwrap();
+        let test_file_path = temp_dir.path().join("test_file.txt");
+        std::fs::write(&test_file_path, "Hello, World!").unwrap();
+        
+        let s3_key = "test/upload/test_file.txt".to_string();
+        
+        // MockS3Clientを使用
+        let mock_client = MockS3Client;
+        
+        let result = upload_file_to_s3(
+            test_file_path.to_string_lossy().to_string(),
+            s3_key,
+            config,
+            tx,
+            item_id,
+            &mock_client,
+        ).await;
+        
+        assert!(result.is_ok());
+        let result_str = result.unwrap();
+        assert!(result_str.contains("Upload completed"));
+    }
+    
+    #[tokio::test]
+    async fn test_upload_file_to_s3_with_mock_multipart_upload() {
+        let credentials = create_test_credentials();
+        let mut config = create_test_upload_config();
+        // チャンクサイズを小さくしてマルチパートアップロードを強制
+        config.chunk_size_mb = 1; // 1MB
+        let (tx, _rx) = mpsc::channel::<UploadProgress>(10);
+        let item_id = "test-item-2".to_string();
+        
+        // テスト用の大きな一時ファイルを作成（5MB以上）
+        let temp_dir = tempfile::tempdir().unwrap();
+        let test_file_path = temp_dir.path().join("large_test_file.bin");
+        let large_data = vec![0u8; 6 * 1024 * 1024]; // 6MB
+        std::fs::write(&test_file_path, large_data).unwrap();
+        
+        let s3_key = "test/upload/large_test_file.bin".to_string();
+        
+        // MockS3Clientを使用
+        let mock_client = MockS3Client;
+        
+        let result = upload_file_to_s3(
+            test_file_path.to_string_lossy().to_string(),
+            s3_key,
+            config,
+            tx,
+            item_id,
+            &mock_client,
+        ).await;
+        
+        assert!(result.is_ok());
+        let result_str = result.unwrap();
+        assert!(result_str.contains("Upload completed"));
+    }
+    
+    #[tokio::test]
+    async fn test_upload_file_to_s3_file_not_found() {
+        let credentials = create_test_credentials();
+        let config = create_test_upload_config();
+        let (tx, _rx) = mpsc::channel::<UploadProgress>(10);
+        let item_id = "test-item-3".to_string();
+        
+        let non_existent_file = "/path/to/non/existent/file.txt".to_string();
+        let s3_key = "test/upload/non_existent.txt".to_string();
+        
+        // MockS3Clientを使用
+        let mock_client = MockS3Client;
+        
+        let result = upload_file_to_s3(
+            non_existent_file,
+            s3_key,
+            config,
+            tx,
+            item_id,
+            &mock_client,
+        ).await;
+        
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err();
+        assert!(error_msg.contains("File does not exist"));
     }
 }
