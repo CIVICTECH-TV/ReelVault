@@ -333,10 +333,17 @@ describe('ConfigManager', () => {
       expect(TauriCommands.TauriCommands.authenticateAws).toHaveBeenCalled();
     }, { timeout: 5000 });
 
-    // 認証成功の表示を待つ
+    // 認証成功の表示を待つ（AuthManagerが分離されたため、コールバックの呼び出しを確認）
     await waitFor(() => {
-      expect(screen.getByText(/✅ 成功/)).toBeInTheDocument();
+      expect(defaultProps.onAuthSuccess).toHaveBeenCalled();
     }, { timeout: 5000 });
+
+    // AuthManagerが表示されることを確認
+    await waitFor(() => {
+      expect(screen.getByText('設定')).toBeInTheDocument();
+    });
+
+    // バケットアクセステスト機能はAuthManagerから削除されました
   });
 
   it('should handle AWS authentication failure', async () => {
@@ -760,10 +767,15 @@ describe('ConfigManager', () => {
       fireEvent.click(authButton);
     });
 
-    // 認証成功の表示を待つ（柔軟なマッチャーに変更）
+    // 認証成功の表示を待つ（AuthManagerが分離されたため、コールバックの呼び出しを確認）
     await waitFor(() => {
-      expect(screen.getByText((content) => content.includes('✅') && content.includes('成功'))).toBeInTheDocument();
+      expect(defaultProps.onAuthSuccess).toHaveBeenCalled();
     }, { timeout: 5000 });
+
+    // AuthManagerが表示されることを確認
+    await waitFor(() => {
+      expect(screen.getByText('設定')).toBeInTheDocument();
+    });
 
     // バケット名フィールドが表示されることを確認
     await waitFor(() => {

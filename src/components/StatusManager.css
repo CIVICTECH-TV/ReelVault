@@ -1,0 +1,168 @@
+/* src/components/StatusManager.css */
+
+.config-section {
+  padding: 2rem;
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-primary);
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.config-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 1.5rem;
+  color: var(--text-primary);
+  margin-bottom: 2rem;
+  border-bottom: 2px solid var(--accent-primary);
+  padding-bottom: 1rem;
+}
+
+.config-section .icon {
+  font-size: 1.8rem;
+}
+
+.config-group {
+  margin-bottom: 1.5rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.config-group.centered-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 1rem;
+}
+
+.config-group label {
+  font-weight: bold;
+  margin-bottom: 0.5rem;
+  color: var(--text-secondary);
+  flex-basis: 180px; /* ラベルの幅を固定 */
+  text-align: right;
+  padding-right: 1rem;
+}
+
+.readonly-input {
+  flex-grow: 1;
+  padding: 0.75rem 1rem;
+  border: 2px solid var(--border-secondary);
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-radius: 8px;
+  font-size: 1rem;
+  cursor: not-allowed;
+  transition: all 0.3s ease;
+}
+
+/* Toggle Switch for Debug Log */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 60px;
+  height: 34px;
+  cursor: pointer;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 34px;
+  transition: .4s;
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 26px;
+  width: 26px;
+  left: 4px;
+  bottom: 3px;
+  background-color: white;
+  border-radius: 50%;
+  transition: .4s;
+}
+
+input:checked + .toggle-slider {
+  background-color: var(--accent-primary);
+}
+
+input:checked + .toggle-slider:before {
+  transform: translateX(26px);
+}
+
+/* Upload Queue & Progress */
+.upload-queue, .current-uploads {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  border: 1px solid var(--border-primary);
+}
+
+.queue-item, .upload-progress {
+  margin-bottom: 0.75rem;
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--border-secondary);
+}
+.queue-item:last-child, .upload-progress:last-child {
+  border-bottom: none;
+}
+
+.queue-item p, .upload-progress p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+.queue-item p strong, .upload-progress p strong {
+  color: var(--text-primary);
+}
+.queue-more {
+  text-align: center;
+  color: var(--text-muted);
+  margin-top: 0.5rem;
+}
+
+.progress-bar {
+  width: 100%;
+  background-color: var(--bg-tertiary);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 0.5rem;
+  height: 10px;
+  border: 1px solid var(--border-secondary);
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-secondary) 0%, var(--accent-primary) 100%);
+  transition: width 0.3s ease;
+}
+
+/* Error Display */
+.error-display {
+  padding: 1rem;
+  background: rgba(244, 67, 54, 0.1);
+  border: 1px solid var(--accent-error);
+  border-radius: 8px;
+  margin-top: 1rem;
+}
+
+.error-message {
+  color: var(--accent-error);
+  font-weight: bold;
+} 

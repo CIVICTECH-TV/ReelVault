@@ -15,6 +15,21 @@
   font-feature-settings: "liga" 1, "kern" 1;
 }
 
+/* 2列レイアウト */
+.two-column-layout {
+  width: 100%;
+  box-sizing: border-box;
+  height: 100vh;
+  display: flex;
+  flex-direction: row;
+  /* 日本語フォント改善 */
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic Medium", "Meiryo", "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "liga" 1, "kern" 1;
+}
+
 .config-manager.loading {
   display: flex;
   flex-direction: column;
@@ -211,12 +226,7 @@
   margin-bottom: 4px;
 }
 
-/* 2列レイアウト */
-.two-column-layout {
-  display: flex;
-  flex: 1;
-  height: 100%;
-}
+/* 2列レイアウトは上部で定義済み */
 
 .sidebar {
   width: 240px;
@@ -236,9 +246,8 @@
 
 .main-content {
   flex: 1;
-  padding: 24px;
   overflow-y: auto;
-  background: rgb(238, 238, 238);
+  min-height: 100vh;
 }
 
 /* タブ */
@@ -501,7 +510,7 @@
   }
 
   .main-content {
-    padding: 16px;
+    padding: 1rem;
   }
 }
 
@@ -525,10 +534,7 @@
 }
 
 .checkbox-item input[type="checkbox"] {
-  margin-left: 8px;
-  transform: scale(1.1);
-  accent-color: #333333;
-  flex-shrink: 0;
+  display: none;
 }
 
 /* ステータス・APIテスト */
@@ -1316,10 +1322,11 @@
 }
 
 .form-section h4 {
-  margin-top: 0;
-  margin-bottom: 20px;
-  color: #555;
-  font-size: 1.1em;
+  color: var(--text-secondary);
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-secondary);
 }
 
 .input-note {
@@ -1401,4 +1408,15 @@ html[data-theme='light'] .cf-setup-panel {
 
 html[data-theme='light'] .cf-setup-panel ol {
   color: #333;
+}
+
+/* 統一パネルスタイル */
+.config-section {
+  padding: 2rem;
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-primary);
+  height: 100%;
+  box-sizing: border-box;
 }

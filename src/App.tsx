@@ -11,12 +11,6 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const configManagerRef = useRef<ConfigManagerRef | null>(null);
 
-  const [healthStatus, setHealthStatus] = useState<{ isHealthy: boolean; lastCheck: Date | null; bucketName: string | undefined }>({
-    isHealthy: true,
-    lastCheck: null,
-    bucketName: undefined
-  });
-
   // アプリ起動時に設定と状態を読み込み
   useEffect(() => {
     const initializeApp = async () => {
@@ -45,7 +39,6 @@ function App() {
     const setupEventListener = async () => {
       try {
         unlisten = await listen('open-settings', () => {
-          console.log('システムトレイから設定タブを開く要求を受信');
           if (configManagerRef.current) {
             configManagerRef.current.openSettingsTab();
           }
@@ -64,13 +57,6 @@ function App() {
     };
   }, []);
 
-  // configが変更されたらテーマを適用
-  useEffect(() => {
-    if (config?.app_settings?.theme) {
-      document.documentElement.setAttribute('data-theme', config.app_settings.theme);
-    }
-  }, [config]);
-
   const handleConfigChange = (newConfig: AppConfig) => {
     setConfig(newConfig);
   };
@@ -82,10 +68,6 @@ function App() {
   const handleAuthSuccess = () => {
     // 認証成功時に状態を再読み込み
     TauriCommands.getAppState().then(setAppState).catch(() => {});
-  };
-
-  const handleHealthStatusChange = (status: { isHealthy: boolean; lastCheck: Date | null; bucketName: string | undefined }) => {
-    setHealthStatus(status);
   };
 
   if (isLoading) {
@@ -101,24 +83,14 @@ function App() {
   }
 
   return (
-    <div className="app-container">
-      <ConfigManager
-        ref={configManagerRef}
-        initialConfig={config}
-        initialState={appState}
-        onConfigChange={handleConfigChange}
-        onStateChange={handleStateChange}
-        onAuthSuccess={handleAuthSuccess}
-        onHealthStatusChange={handleHealthStatusChange}
-      />
-      
-      {/* 健全性状態の表示（開発用） */}
-      {!healthStatus.isHealthy && (
-        <div className="app-warning">
-          ⚠️ アップロード機能が利用できません。AWS設定を確認してください。
-        </div>
-      )}
-    </div>
+    <ConfigManager
+      ref={configManagerRef}
+      initialConfig={config}
+      initialState={appState}
+      onConfigChange={handleConfigChange}
+      onStateChange={handleStateChange}
+      onAuthSuccess={handleAuthSuccess}
+    />
   );
 }
 

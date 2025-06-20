@@ -1,1289 +1,584 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { flushSync } from 'react-dom';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { TauriCommands, UploadItem, UploadStatus, UploadStatistics, FileSelection, UploadConfig, AwsCredentials, UploadProgressInfo } from '../services/tauriCommands';
-import { debugLog, isDev, debugError, debugWarn, debugInfo } from '../utils/debug';
+
+import { 
+  TauriCommands, 
+  UploadConfig, 
+  UploadItem,
+  UploadStatus,
+  UploadProgress,
+  AppConfig,
+  AppState,
+  AwsCredentials
+} from '../services/tauriCommands';
+import { debugLog, debugError, debugInfo } from '../utils/debug';
 import './UploadManager.css';
 
-// バックアップアイコンのインポート
+// アイコンのインポート
 import backupIcon from '../assets/icons/backup.svg';
 
+// ファイルサイズフォーマット関数
+const formatBytes = (bytes: number): string => {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+};
+
 interface UploadManagerProps {
-  awsCredentials?: AwsCredentials;
-  bucketName?: string;
-  onUploadComplete?: (items: UploadItem[]) => void;
-  onError?: (error: string) => void;
+  config: AppConfig;
+  onConfigChange: (path: string, value: any) => void;
+  onStateChange: (state: AppState) => void;
+  onError: (error: string) => void;
+  onSuccess: (message: string) => void;
 }
 
 // 無料版制限
 const FREE_TIER_LIMITS = {
-  MAX_FILE_SIZE_GB: 160, // AWS S3コンソール相当
-  MAX_TOTAL_SIZE_GB: 160,
-  MAX_CONCURRENT_UPLOADS: 1, // 単発処理
-  MAX_CONCURRENT_PARTS: 1, // チャンク順次処理
-  SUPPORTED_FORMATS: ['*'], // 全形式対応
+  MAX_CONCURRENT_UPLOADS: 1,
+  MAX_CONCURRENT_PARTS: 1,
+  CHUNK_SIZE_MB: 5,
+  RETRY_ATTEMPTS: 3,
+  TIMEOUT_SECONDS: 600,
+  ENABLE_RESUME: false,
+  ADAPTIVE_CHUNK_SIZE: false,
+  MIN_CHUNK_SIZE_MB: 5,
+  MAX_CHUNK_SIZE_MB: 5
 };
 
 // プレミアム版制限
 const PREMIUM_TIER_LIMITS = {
-  MAX_FILE_SIZE_GB: 5000, // 5TB
-  MAX_TOTAL_SIZE_GB: 50000, // 50TB
-  MAX_CONCURRENT_UPLOADS: 8, // 8ファイル同時
-  MAX_CONCURRENT_PARTS: 8, // 8チャンク並列
-  SUPPORTED_FORMATS: ['*'], // 全形式対応
+  MAX_CONCURRENT_UPLOADS: 8,
+  MAX_CONCURRENT_PARTS: 8,
+  CHUNK_SIZE_MB: 10,
+  RETRY_ATTEMPTS: 10,
+  TIMEOUT_SECONDS: 1800,
+  ENABLE_RESUME: true,
+  ADAPTIVE_CHUNK_SIZE: true,
+  MIN_CHUNK_SIZE_MB: 5,
+  MAX_CHUNK_SIZE_MB: 1024
 };
 
 export const UploadManager: React.FC<UploadManagerProps> = ({
-  awsCredentials,
-  bucketName,
-  onUploadComplete,
-  onError
+  config,
+  onConfigChange,
+  onStateChange,
+  onError,
+  onSuccess
 }) => {
   const [isDragOver, _setIsDragOver] = useState(false);
   const [uploadQueue, setUploadQueue] = useState<UploadItem[]>([]);
-  const [_uploadStats, setUploadStats] = useState<UploadStatistics | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [selectedFiles, setSelectedFiles] = useState<FileSelection | null>(null);
   const [uploadConfig, setUploadConfig] = useState<UploadConfig | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  
-  // 🎯 設定変更用のstate
+  const [tempConfig, setTempConfig] = useState<Partial<UploadConfig> | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [tempConfig, setTempConfig] = useState<Partial<UploadConfig>>({});
+  const [selectedFiles, setSelectedFiles] = useState<{ selected_files: string[]; total_size: number; file_count: number } | null>(null);
   const [currentTier, setCurrentTier] = useState<'Free' | 'Premium'>('Free');
   
   // デバッグ用: propsの状態をログ出力
   useEffect(() => {
     debugLog('🔍 UploadManager props状態:', {
-      awsCredentials: awsCredentials ? 'あり' : 'なし',
-      bucketName: bucketName || 'なし',
+      awsCredentials: config.aws_settings.default_region ? 'あり' : 'なし',
+      bucketName: config.user_preferences.default_bucket_name || 'なし',
       uploadConfig: uploadConfig ? 'あり' : 'なし'
     });
-  }, [awsCredentials, bucketName, uploadConfig]);
+  }, [config, uploadConfig]);
   
   // ネイティブファイルダイアログを使用するため、refは不要
   const [_forceUpdate, setForceUpdate] = useState(0);
-  // const _progressRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   // 初期化
   useEffect(() => {
     const initializeUpload = async () => {
-      if (!awsCredentials || !bucketName) {
-        debugInfo('AWS credentials or bucket name not available');
+      if (!config.user_preferences.default_bucket_name) {
+        debugInfo('Bucket name not available');
         return;
       }
 
       try {
         // 🎯 デフォルトはプレミアム版設定
-        const defaultConfig = createConfig(awsCredentials, bucketName, 'Premium');
+        const defaultConfig = createConfig(config, 'Premium');
         
         // 🔍 設定内容をデバッグ出力
         debugLog('🔧 生成された設定:', {
+          bucket: defaultConfig.bucket_name,
           tier: defaultConfig.tier,
-          chunk_size_mb: defaultConfig.chunk_size_mb,
-          max_concurrent_uploads: defaultConfig.max_concurrent_uploads,
-          max_concurrent_parts: defaultConfig.max_concurrent_parts,
-          adaptive_chunk_size: defaultConfig.adaptive_chunk_size,
-          min_chunk_size_mb: defaultConfig.min_chunk_size_mb,
-          max_chunk_size_mb: defaultConfig.max_chunk_size_mb
+          maxConcurrent: defaultConfig.max_concurrent_uploads,
+          chunkSize: defaultConfig.chunk_size_mb,
+          retryAttempts: defaultConfig.retry_attempts
         });
-        
-        // 🗑️ 古い設定をクリアして新しい設定で確実に初期化
-        debugInfo('🗑️ 古いキューをクリア中...');
-        await TauriCommands.clearUploadQueue();
-        
-        debugInfo('🔄 新しい設定で初期化中...');
-        await TauriCommands.initializeUploadQueue(defaultConfig);
-        
+
         setUploadConfig(defaultConfig);
         setTempConfig(defaultConfig);
-        setCurrentTier('Premium');
-        
-        debugInfo('✅ Upload system initialized with premium tier config');
+        setCurrentTier(defaultConfig.tier);
       } catch (error) {
-        debugError('Failed to initialize upload system:', error);
-        setError(`アップロードシステムの初期化に失敗しました: ${error}`);
+        debugError('Upload config initialization failed:', error);
+        onError('アップロード設定の初期化に失敗しました');
       }
     };
 
     initializeUpload();
-  }, [awsCredentials, bucketName]);
+  }, [config]);
 
   // uploadQueueの変更を監視して強制的に再レンダリング
   useEffect(() => {
-    debugLog(`🎨 uploadQueue変更検知: ${uploadQueue.length}個のファイル`);
-    uploadQueue.forEach((item, index) => {
-      debugLog(`  [${index}] ${item.file_name}: ${item.uploaded_bytes}/${item.file_size} bytes (${((item.uploaded_bytes / item.file_size) * 100).toFixed(1)}%)`);
-    });
-    
-    // 強制的に再レンダリング
     setForceUpdate(prev => prev + 1);
   }, [uploadQueue]);
 
-  // 進捗更新のリスナー
+  // アップロード完了監視
   useEffect(() => {
-    if (!uploadConfig) return;
-    
-    debugInfo('🎧 進捗リスナーを設定中...');
-    debugLog('🎧 リスナー設定時のuploadConfig:', uploadConfig);
-    
-    // テスト用のイベントリスナーも追加
-    const testUnlisten = listen('test-event', (event) => {
-      debugLog('🧪 テストイベント受信:', event);
-    });
-    
-    const unlisten = listen<UploadProgressInfo>('upload-progress', (event) => {
-      const progress = event.payload;
-      
-      // 全ての進捗イベントをログ出力（デバッグ用）
-      debugLog('📊 進捗イベント受信:', {
-        item_id: progress.item_id,
-        percentage: progress.percentage.toFixed(1),
-        uploaded: `${(progress.uploaded_bytes / (1024 * 1024)).toFixed(1)}MB`,
-        total: `${(progress.total_bytes / (1024 * 1024)).toFixed(1)}MB`,
-        speed: progress.speed_mbps.toFixed(1),
-        status: progress.status
-      });
-      
-      // 直接DOM操作で進捗バーを即時に更新
-      const progressBarElement = document.querySelector(`[data-item-id="${progress.item_id}"] .progress-fill`);
-      const progressTextElement = document.querySelector(`[data-item-id="${progress.item_id}"] .progress-text`);
-      const progressBytesElement = document.querySelector(`[data-item-id="${progress.item_id}"] .progress-bytes`);
-      const speedElement = document.querySelector(`[data-item-id="${progress.item_id}"] .upload-speed`);
-      
-      if (progressBarElement) {
-        (progressBarElement as HTMLElement).style.width = `${Math.max(0, Math.min(100, progress.percentage))}%`;
-        (progressBarElement as HTMLElement).style.backgroundColor = progress.status === UploadStatus.Completed ? '#22c55e' : '#3b82f6';
-        debugLog(`🎨 直接DOM更新: 進捗バー ${progress.percentage.toFixed(1)}%`);
-      }
-      
-      if (progressTextElement) {
-        progressTextElement.textContent = `${progress.percentage.toFixed(1)}%`;
-        debugLog(`🎨 直接DOM更新: 進捗テキスト ${progress.percentage.toFixed(1)}%`);
-      }
-      
-      if (progressBytesElement) {
-        const formatBytes = (bytes: number) => {
-          if (bytes === 0) return '0 B';
-          const k = 1024;
-          const sizes = ['B', 'KB', 'MB', 'GB'];
-          const i = Math.floor(Math.log(bytes) / Math.log(k));
-          return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        };
-        progressBytesElement.textContent = `${formatBytes(progress.uploaded_bytes)} / ${formatBytes(progress.total_bytes)}`;
-      }
-      
-      if (speedElement) {
-        speedElement.textContent = `⚡ ${progress.speed_mbps.toFixed(2)} MB/s`;
-      }
-      
-      // DOM直接操作は削除 - React状態更新に一本化
+    if (!uploadConfig || !isUploading) return;
 
-      // React状態更新を強制的に即時実行（flushSyncで自動バッチングを無効化）
-      flushSync(() => {
-        setUploadQueue(prev => {
-          const updated = prev.map(item => {
-            if (item.id === progress.item_id) {
-              debugLog(`🔄 ファイル進捗更新: ${item.file_name} -> ${progress.percentage.toFixed(1)}%`);
-              const updatedItem = { 
-                ...item, 
-                progress: progress.percentage,
-                uploaded_bytes: progress.uploaded_bytes,
-                speed_mbps: progress.speed_mbps,
-                eta_seconds: progress.eta_seconds,
-                status: progress.status,
-                // 完了時の処理
-                ...(progress.status === UploadStatus.Completed && {
-                  completed_at: new Date().toISOString()
-                })
-              };
-              
-              // 即時にUI更新確認
-              debugLog(`✅ UI更新確認: ${updatedItem.file_name} = ${updatedItem.progress.toFixed(1)}% (${updatedItem.status})`);
-              return updatedItem;
-            }
-            return item;
-          });
-          
-          console.log(`🎨 状態更新実行: キュー内${updated.length}個のファイル`);
-          return updated;
-        });
-      });
-      
-      // 統計情報も即時に更新（flushSyncで強制反映）
-      flushSync(() => {
-        setUploadStats(prev => {
-          if (!prev) return prev;
-          
-          const newStats = {
-            ...prev,
-            uploaded_bytes: prev.uploaded_bytes + (progress.uploaded_bytes - (prev.uploaded_bytes || 0)),
-            average_speed_mbps: progress.speed_mbps
-          };
-          
-          console.log(`📊 統計情報更新: ${newStats.uploaded_bytes}/${newStats.total_bytes} bytes`);
-          return newStats;
-        });
-      });
-      
-      // 強制的にReactの再描画をトリガー
-      setTimeout(() => {
-        console.log(`🎨 強制再描画トリガー: ${progress.item_id} ${progress.percentage.toFixed(1)}%`);
-        setForceUpdate(prev => prev + 1);
-      }, 0);
-      
-      // 完了時の統計情報表示と状態管理
-      if (progress.status === UploadStatus.Completed) {
-        const fileSizeMB = (progress.total_bytes / (1024 * 1024)).toFixed(2);
-        const avgSpeedMBps = progress.speed_mbps || 0;
-        const totalTimeSec = progress.total_bytes > 0 ? progress.total_bytes / (1024 * 1024) / Math.max(avgSpeedMBps, 0.1) : 0;
-        
-        console.log(`✅ アップロード完了: ${progress.item_id}`);
-        console.log(`📊 統計情報:
-          - ファイルサイズ: ${fileSizeMB} MB
-          - 平均速度: ${avgSpeedMBps.toFixed(1)} MB/s
-          - 総時間: ${totalTimeSec.toFixed(0)}秒
-          - 進捗: ${progress.percentage.toFixed(1)}%`);
-        
-        // 完了時に統計情報を更新
-        setTimeout(async () => {
-          try {
-            const stats = await TauriCommands.getUploadQueueStatus();
-            setUploadStats(stats);
-            console.log('📊 統計情報更新完了:', stats);
-            
-            // 全ファイル完了チェック
-            const queueItems = await TauriCommands.getUploadQueueItems();
-            const allCompleted = queueItems.every(item => 
-              item.status === UploadStatus.Completed || 
-              item.status === UploadStatus.Failed || 
-              item.status === UploadStatus.Cancelled
-            );
-            
-            if (allCompleted) {
-              debugInfo('🎉 全てのアップロードが完了しました（リアルタイム検知）');
-              // 完了状態も即時に反映
-              flushSync(() => {
-                setIsUploading(false);
-              });
-              TauriCommands.stopUploadProcessing().catch(err => 
-                debugWarn('アップロード停止コマンドの実行に失敗:', err)
-              );
-            }
-          } catch (err) {
-            debugError('完了時の統計更新に失敗:', err);
-          }
-        }, 100);
-      }
-    });
-
-    return () => {
-      console.log('🎧 進捗リスナーを解除中...');
-      if (unlisten && typeof unlisten.then === 'function') unlisten.then(f => f && typeof f === 'function' && f());
-      if (testUnlisten && typeof testUnlisten.then === 'function') testUnlisten.then(f => f && typeof f === 'function' && f());
-    };
-  }, [uploadConfig]); // uploadConfigに依存
-
-  // アップロードキューの状態を定期的に更新（リアルタイム進捗テスト中は無効化）
-  useEffect(() => {
-    if (!uploadConfig || isUploading) return; // アップロード中は定期ポーリングを停止
-
-    console.log('📊 定期ポーリング開始（アップロード停止中のみ）');
-    
     const interval = setInterval(async () => {
       try {
-        const [queueItems, stats] = await Promise.all([
-          TauriCommands.getUploadQueueItems(),
-          TauriCommands.getUploadQueueStatus()
-        ]);
-        
-        console.log('📊 定期ポーリング実行:', queueItems.map(item => ({
-          name: item.file_name,
-          status: item.status,
-          progress: item.progress.toFixed(1)
-        })));
-        
-        // アップロード中でない場合のみ更新
+        const queueItems = await TauriCommands.getUploadQueueItems();
         setUploadQueue(queueItems);
-        setUploadStats(stats);
-        
-        // アップロード完了チェック
-        const inProgress = queueItems.some(item => 
-          item.status === UploadStatus.InProgress || item.status === UploadStatus.Pending
-        );
-        
-        const allCompleted = queueItems.length > 0 && queueItems.every(item => 
+
+        // 全て完了したかチェック
+        const allCompleted = queueItems.every(item => 
           item.status === UploadStatus.Completed || 
           item.status === UploadStatus.Failed || 
           item.status === UploadStatus.Cancelled
         );
-        
-        if (allCompleted && !inProgress) {
+
+        if (allCompleted && queueItems.length > 0) {
+          setIsUploading(false);
           debugInfo('🎉 全てのアップロードが完了しました（定期チェック）');
           const completedItems = queueItems.filter(item => item.status === UploadStatus.Completed);
-          onUploadComplete?.(completedItems);
+          onSuccess?.(`${completedItems.length}個のファイルがアップロード完了しました`);
         }
       } catch (err) {
-        debugError('アップロード状態の更新に失敗:', err);
+        debugError('Upload queue check failed:', err);
+        clearInterval(interval);
       }
-    }, 10000); // 10秒間隔に延長
+    }, 1000);
 
     return () => {
-      console.log('📊 定期ポーリング停止');
       clearInterval(interval);
     };
-  }, [uploadConfig, isUploading, onUploadComplete]);
+  }, [uploadConfig, isUploading, onSuccess]);
 
   // ファイルサイズの検証
-  // const validateFileSize = (files: File[]): { valid: boolean; errors: string[] } => {
-  //   const errors: string[] = [];
-  //   let totalSizeGB = 0;
-
-  //   for (const file of files) {
-  //     const fileSizeGB = file.size / (1024 * 1024 * 1024);
-  //     totalSizeGB += fileSizeGB;
-
-  //     if (fileSizeGB > FREE_TIER_LIMITS.MAX_FILE_SIZE_GB) {
-  //       errors.push(`${file.name}: ファイルサイズが制限を超えています (${fileSizeGB.toFixed(2)}GB > ${FREE_TIER_LIMITS.MAX_FILE_SIZE_GB}GB)`);
-  //     }
-  //   }
-
-  //   if (totalSizeGB > FREE_TIER_LIMITS.MAX_TOTAL_SIZE_GB) {
-  //     errors.push(`合計ファイルサイズが制限を超えています (${totalSizeGB.toFixed(2)}GB > ${FREE_TIER_LIMITS.MAX_TOTAL_SIZE_GB}GB)`);
-  //   }
-
-  //   return { valid: errors.length === 0, errors };
-  // };
-
-  // ファイルダイアログを開く（Tauriネイティブダイアログを使用）
-  const handleFileDialogOpen = useCallback(async () => {
-    if (!uploadConfig) {
-      setError('アップロード設定が初期化されていません');
-      return;
-    }
-
-    try {
-      console.log('🗂️ ネイティブファイルダイアログを開いています...');
-      const fileSelection = await TauriCommands.openFileDialog(true, undefined);
-      
-      console.log('📁 ファイル選択結果:', fileSelection);
-      
-      if (fileSelection.file_count === 0) {
-        console.log('ファイルが選択されませんでした');
-        return;
-      }
-
-      // 無料版制限チェック
-      const totalSizeGB = fileSelection.total_size / (1024 * 1024 * 1024);
-      if (totalSizeGB > FREE_TIER_LIMITS.MAX_TOTAL_SIZE_GB) {
-        setError(`選択されたファイルの合計サイズ（${totalSizeGB.toFixed(2)}GB）が制限（${FREE_TIER_LIMITS.MAX_TOTAL_SIZE_GB}GB）を超えています`);
-        return;
-      }
-
-      setSelectedFiles(fileSelection);
-      setError(null);
-      debugInfo('✅ ファイル選択完了:', fileSelection);
-    } catch (err) {
-      debugError('ファイル選択エラー:', err);
-      setError(`ファイル選択エラー: ${err}`);
-    }
-  }, [uploadConfig]);
-
-  // ドラッグ&ドロップ処理（一旦無効化 - ネイティブファイルダイアログを使用するため）
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    // ドラッグ&ドロップは無効化
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    // ドラッグ&ドロップは無効化
-  }, []);
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    // ドラッグ&ドロップは無効化
-  }, []);
-
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    // ドラッグ&ドロップは無効化 - ネイティブファイルダイアログを使用
-    console.log('ドラッグ&ドロップは現在無効です。ファイル選択ボタンを使用してください。');
-  }, []);
-
-  // アップロード開始
-  const handleStartUpload = useCallback(async () => {
-    if (!uploadConfig) {
-      setError('アップロード設定が初期化されていません');
-      return;
-    }
-
-    // selectedFilesがある場合は、まずキューに追加
-    if (selectedFiles && selectedFiles.file_count > 0) {
-      try {
-        console.log('📋 選択されたファイルをキューに追加中...');
-        
-        // S3キー設定
-        const s3KeyConfig = {
-          prefix: uploadConfig.s3_key_prefix,
-          use_date_folder: true,
-          preserve_directory_structure: false,
-          custom_naming_pattern: undefined,
-        };
-
-        // ネイティブファイルダイアログで取得した実際のファイルパスを使用
-        await TauriCommands.addFilesToUploadQueue(selectedFiles.selected_files, s3KeyConfig);
-        debugInfo(`✅ ${selectedFiles.file_count}個のファイルをキューに追加しました`);
-
-        // キューの状態を更新
-        const [queueItems, stats] = await Promise.all([
-          TauriCommands.getUploadQueueItems(),
-          TauriCommands.getUploadQueueStatus()
-        ]);
-        
-        setUploadQueue(queueItems);
-        setUploadStats(stats);
-        console.log('📊 キュー状態更新完了:', { items: queueItems.length });
-        
-        // 更新されたキューが空の場合はエラー
-        if (queueItems.length === 0) {
-          setError('ファイルをキューに追加できませんでした。ファイルが存在しないか、アクセスできません。');
-          return;
-        }
-        
-      } catch (err) {
-        debugError('キューへの追加に失敗:', err);
-        setError(`ファイルをキューに追加できませんでした: ${err}`);
-        return;
-      }
-    } else {
-      // selectedFilesがない場合は、既存のキューをチェック
-      if (uploadQueue.length === 0) {
-        setError('アップロードするファイルがありません。まずファイルを選択してください。');
-        return;
-      }
-    }
-
-    try {
-      setIsUploading(true);
-      setError(null);
-      
-      console.log('アップロード処理を開始します');
-      await TauriCommands.startUploadProcessing();
-      
-      console.log('アップロード処理が開始されました');
-    } catch (err) {
-      const errorMsg = `アップロード開始に失敗しました: ${err}`;
-      setError(errorMsg);
-      onError?.(errorMsg);
-      setIsUploading(false);
-    }
-  }, [uploadConfig, selectedFiles, uploadQueue.length, onError]);
-
-  // アップロード停止
-  const handleStopUpload = useCallback(async () => {
-    try {
-      await TauriCommands.stopUploadProcessing();
-      setIsUploading(false);
-    } catch (err) {
-      console.error('アップロード停止に失敗:', err);
-    }
-  }, []);
-
-  // キューのクリア
-  const handleClearQueue = useCallback(async () => {
-    try {
-      await TauriCommands.clearUploadQueue();
-      setUploadQueue([]);
-      setSelectedFiles(null);
-      setError(null);
-    } catch (err) {
-      console.error('キューのクリアに失敗:', err);
-    }
-  }, []);
-
-  // アイテムの再試行
-  const handleRetryItem = useCallback(async (itemId: string) => {
-    try {
-      await TauriCommands.retryUploadItem(itemId);
-    } catch (err) {
-      console.error('再試行に失敗:', err);
-    }
-  }, []);
-
-  // ファイルサイズのフォーマット
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
-
-  // 全体進捗の計算（改善版：数値型チェックと安全な計算）
-  const getOverallProgress = (): number => {
-    console.log(`🔍 getOverallProgress呼び出し: uploadQueue.length=${uploadQueue.length}`);
+  const validateFileSize = (files: File[]): { valid: boolean; message?: string } => {
+    const maxSize = 1024 * 1024 * 1024 * 1024; // 1TB
+    const oversizedFiles = files.filter(file => file.size > maxSize);
     
-    if (uploadQueue.length === 0) {
-      console.log(`⚠️ uploadQueueが空のため、全体進捗は0%`);
-      return 0;
+    if (oversizedFiles.length > 0) {
+      return {
+        valid: false,
+        message: `${oversizedFiles.length}個のファイルが1TB制限を超えています`
+      };
     }
     
-    // 安全な数値計算
-    let totalBytes = 0;
-    let uploadedBytes = 0;
-    
-    console.log(`🔍 各ファイルの送信済み容量（安全計算）:`);
-    uploadQueue.forEach((item, index) => {
-      // 数値型チェックと安全な変換
-      const fileSize = Number(item.file_size) || 0;
-      const uploaded = Number(item.uploaded_bytes) || 0;
-      
-      totalBytes += fileSize;
-      uploadedBytes += uploaded;
-      
-      console.log(`  [${index}] ${item.file_name}:`);
-      console.log(`    - uploaded_bytes: ${uploaded} (元: ${item.uploaded_bytes}, 型: ${typeof item.uploaded_bytes})`);
-      console.log(`    - file_size: ${fileSize} (元: ${item.file_size}, 型: ${typeof item.file_size})`);
-      console.log(`    - progress: ${item.progress}%`);
-      console.log(`    - status: ${item.status}`);
-      
-      // 個別ファイルの進捗も確認
-      if (fileSize > 0) {
-        const individualProgress = (uploaded / fileSize) * 100;
-        console.log(`    - 個別進捗計算: ${individualProgress.toFixed(1)}%`);
-      }
-    });
-    
-    console.log(`🔍 合計（安全計算）: ${uploadedBytes}/${totalBytes} bytes`);
-    
-    if (totalBytes === 0) {
-      console.log(`⚠️ totalBytesが0のため、全体進捗は0%`);
-      return 0;
-    }
-    
-    // 安全な割り算
-    const progress = (uploadedBytes / totalBytes) * 100;
-    
-    // NaN や Infinity のチェック
-    if (!isFinite(progress)) {
-      console.error(`❌ 無効な進捗値: ${progress}, uploadedBytes=${uploadedBytes}, totalBytes=${totalBytes}`);
-      return 0;
-    }
-    
-    const finalProgress = Math.round(Math.min(100, Math.max(0, progress)));
-    
-    console.log(`🔍 計算結果（安全）: ${progress.toFixed(2)}% -> ${finalProgress}%`);
-    
-    // 異常値の詳細チェック
-    if (finalProgress === 0 && uploadedBytes > 0) {
-      console.error(`❌ 0%表示問題検出!`);
-      console.error(`  - uploadedBytes: ${uploadedBytes}`);
-      console.error(`  - totalBytes: ${totalBytes}`);
-      console.error(`  - progress計算: ${progress.toFixed(2)}%`);
-      console.error(`  - uploadQueue詳細:`, uploadQueue.map(item => ({
-        name: item.file_name,
-        uploaded_bytes: item.uploaded_bytes,
-        uploaded_bytes_type: typeof item.uploaded_bytes,
-        file_size: item.file_size,
-        file_size_type: typeof item.file_size,
-        progress: item.progress,
-        status: item.status
-      })));
-    }
-    
-    return finalProgress;
-  };
-
-  // ファイル数ベースの進捗（リアルタイム - uploadQueueベース）
-  const getFileProgress = (): { completed: number; total: number } => {
-    if (uploadQueue.length === 0) return { completed: 0, total: 0 };
-    
-    const completed = uploadQueue.filter(item => 
-      item.status === UploadStatus.Completed
-    ).length;
-    
-    return { 
-      completed, 
-      total: uploadQueue.length 
-    };
-  };
-
-  // リアルタイム統計情報の計算（シンプルに：送信済み容量を直接合計）
-  const getRealTimeStats = () => {
-    if (uploadQueue.length === 0) return null;
-    
-    let totalBytes = 0;
-    let uploadedBytes = 0;
-    let totalSpeed = 0;
-    let activeUploads = 0;
-    
-    uploadQueue.forEach(item => {
-      totalBytes += item.file_size;
-      uploadedBytes += item.uploaded_bytes; // 直接使用！
-      
-      if (item.status === UploadStatus.InProgress) {
-        totalSpeed += item.speed_mbps; // 合計速度（平均ではない）
-        activeUploads++;
-      }
-    });
-    
-    return {
-      totalBytes,
-      uploadedBytes,
-      totalSpeed, // 合計速度に変更
-      activeUploads
-    };
+    return { valid: true };
   };
 
   // 🎯 統一された設定生成関数
-  const createConfig = (credentials: AwsCredentials, bucket: string, tier: 'Free' | 'Premium'): UploadConfig => {
-    // 基本設定（共通）
-    const baseConfig = {
-      aws_credentials: credentials,
-      bucket_name: bucket,
+  const createConfig = (currentConfig: AppConfig, tier: 'Free' | 'Premium'): UploadConfig => {
+    const limits = tier === 'Free' ? FREE_TIER_LIMITS : PREMIUM_TIER_LIMITS;
+    
+    // 認証情報は別途管理されているため、ここでは空のオブジェクトを設定
+    // 実際の認証情報はTauriCommands側で管理される
+    const awsCredentials: AwsCredentials = {
+      access_key_id: '', // 実際の値はTauriCommands側で設定
+      secret_access_key: '',
+      region: currentConfig.aws_settings.default_region,
+      session_token: undefined
+    };
+    
+    return {
+      aws_credentials: awsCredentials,
+      bucket_name: currentConfig.user_preferences.default_bucket_name || '',
+      tier: tier,
+      chunk_size_mb: limits.CHUNK_SIZE_MB,
+      max_concurrent_uploads: limits.MAX_CONCURRENT_UPLOADS,
+      max_concurrent_parts: limits.MAX_CONCURRENT_PARTS,
+      adaptive_chunk_size: limits.ADAPTIVE_CHUNK_SIZE,
+      min_chunk_size_mb: limits.MIN_CHUNK_SIZE_MB,
+      max_chunk_size_mb: limits.MAX_CHUNK_SIZE_MB,
+      retry_attempts: limits.RETRY_ATTEMPTS,
+      timeout_seconds: limits.TIMEOUT_SECONDS,
       auto_create_metadata: true,
       s3_key_prefix: 'uploads',
+      enable_resume: limits.ENABLE_RESUME,
+      bandwidth_limit_mbps: undefined
     };
-
-    if (tier === 'Free') {
-      return {
-        ...baseConfig,
-        // 無料版制限
-        max_concurrent_uploads: 1,      // 1ファイルずつ
-        chunk_size_mb: 5,               // 5MB固定
-        retry_attempts: 3,              // 3回まで
-        timeout_seconds: 600,           // 10分
-        max_concurrent_parts: 1,        // チャンクも1つずつ（順次処理）
-        adaptive_chunk_size: false,     // 固定サイズ
-        min_chunk_size_mb: 5,          // 5MB固定
-        max_chunk_size_mb: 5,          // 5MB固定
-        bandwidth_limit_mbps: undefined, // 制限なし
-        enable_resume: false,           // 再開機能なし
-        tier: 'Free',
-      };
-    } else {
-      return {
-        ...baseConfig,
-        // プレミアム版機能
-        max_concurrent_uploads: 8,      // 8ファイル同時
-        chunk_size_mb: 10,              // デフォルト10MB
-        retry_attempts: 10,             // 10回まで
-        timeout_seconds: 1800,          // 30分
-        max_concurrent_parts: 8,        // 8チャンク並列
-        adaptive_chunk_size: true,      // 動的最適化
-        min_chunk_size_mb: 5,          // 最小5MB（S3制限準拠）
-        max_chunk_size_mb: 100,        // 最大100MB
-        bandwidth_limit_mbps: undefined, // 制限なし（設定可能）
-        enable_resume: true,            // 再開機能あり
-        tier: 'Premium',
-      };
-    }
   };
 
   const handleTierChange = (tier: 'Free' | 'Premium') => {
-    if (!awsCredentials || !bucketName) return;
-    
-    const newConfig = createConfig(awsCredentials, bucketName, tier);
-    setTempConfig(newConfig);
     setCurrentTier(tier);
   };
 
   const applySettings = async () => {
-    if (!tempConfig || !awsCredentials || !bucketName) return;
+    if (!tempConfig || !config.user_preferences.default_bucket_name) return;
     
     try {
-      const newConfig = { ...tempConfig } as UploadConfig;
+      const newConfig = createConfig(config, currentTier);
       setUploadConfig(newConfig);
-      
-      // 新しい設定でキューを再初期化
-      await TauriCommands.initializeUploadQueue(newConfig);
       setShowSettings(false);
-      setError(null);
-    } catch (err) {
-      setError(`設定の適用に失敗しました: ${err}`);
+      onSuccess('設定を適用しました');
+    } catch (error) {
+      debugError('Settings application failed:', error);
+      onError('設定の適用に失敗しました');
     }
   };
 
-  const resetSettings = () => {
-    if (uploadConfig) {
-      setTempConfig(uploadConfig);
-      setCurrentTier(uploadConfig.tier);
+  const handleStartUpload = async () => {
+    if (!uploadConfig || !selectedFiles) {
+      onError('アップロード設定またはファイルが選択されていません');
+      return;
     }
-    setShowSettings(false);
+
+    try {
+      setIsUploading(true);
+      
+      // まずキューを初期化
+      await TauriCommands.initializeUploadQueue(uploadConfig);
+      
+      // ファイルをキューに追加
+      const s3KeyConfig = {
+        prefix: uploadConfig.s3_key_prefix,
+        use_date_folder: true,
+        preserve_directory_structure: false,
+        custom_naming_pattern: undefined
+      };
+      await TauriCommands.addFilesToUploadQueue(selectedFiles.selected_files, s3KeyConfig);
+      
+      // アップロード処理を開始
+      await TauriCommands.startUploadProcessing();
+      
+      debugInfo('Upload started successfully');
+      onSuccess('アップロードを開始しました');
+    } catch (error) {
+      debugError('Upload start failed:', error);
+      onError(error instanceof Error ? error.message : 'アップロード開始に失敗しました');
+      setIsUploading(false);
+    }
+  };
+
+  const handleFileSelect = async () => {
+    try {
+      // TauriCommandsを使用してファイル選択
+      const result = await TauriCommands.openFileDialog(true, undefined);
+      
+      if (result && result.file_count > 0) {
+        setSelectedFiles({
+          selected_files: result.selected_files,
+          total_size: result.total_size,
+          file_count: result.file_count
+        });
+
+        debugInfo('Files selected:', { count: result.file_count, totalSize: result.total_size });
+      }
+    } catch (error) {
+      debugError('File selection failed:', error);
+      onError('ファイル選択に失敗しました');
+    }
+  };
+
+  const handleStopUpload = async () => {
+    try {
+      await TauriCommands.stopUploadProcessing();
+      setIsUploading(false);
+      onSuccess('アップロードを停止しました');
+    } catch (error) {
+      debugError('Upload stop failed:', error);
+      onError('アップロード停止に失敗しました');
+    }
+  };
+
+  const handleClearQueue = async () => {
+    try {
+      await TauriCommands.clearUploadQueue();
+      setUploadQueue([]);
+      onSuccess('アップロードキューをクリアしました');
+    } catch (error) {
+      debugError('Queue clear failed:', error);
+      onError('キュークリアに失敗しました');
+    }
   };
 
   return (
     <div className="upload-manager">
-      <div className="upload-header">
-        <h3><img src={backupIcon} alt="" className="title-icon" />バックアップ</h3>
-        <div className="upload-controls">
-          <button 
-            className="btn-primary" 
-            onClick={handleFileDialogOpen}
-            disabled={isUploading}
-          >
-            📁 ファイル選択
-          </button>
-          <button 
-            className="btn-secondary" 
-            onClick={() => setShowSettings(!showSettings)}
-          >
-            ⚙️ 設定
-          </button>
-        </div>
-      </div>
-
-      {/* デバッグ情報 */}
-      {isDev() && (
-        <div className="config-section debug-info">
-          <h4>デバッグ情報</h4>
-          
-          <div className="config-group">
-            <label>アップロード設定:</label>
-            <input
-              type="text"
-              value={uploadConfig ? '設定済み' : '未設定'}
-              disabled
-              className="readonly-input"
-            />
-          </div>
-
-          {uploadConfig && (
-            <>
-              <div className="config-group">
-                <label>機能ティア:</label>
-                <input
-                  type="text"
-                  value={uploadConfig.tier}
-                  disabled
-                  className="readonly-input"
-                />
-              </div>
-
-              <div className="config-group">
-                <label>同時アップロード数:</label>
-                <input
-                  type="text"
-                  value={uploadConfig.max_concurrent_uploads}
-                  disabled
-                  className="readonly-input"
-                />
-              </div>
-
-              <div className="config-group">
-                <label>チャンク並列数:</label>
-                <input
-                  type="text"
-                  value={uploadConfig.max_concurrent_parts}
-                  disabled
-                  className="readonly-input"
-                />
-              </div>
-
-              <div className="config-group">
-                <label>チャンクサイズ:</label>
-                <input
-                  type="text"
-                  value={`${uploadConfig.chunk_size_mb}MB`}
-                  disabled
-                  className="readonly-input"
-                />
-              </div>
-
-              <div className="config-group">
-                <label>動的チャンクサイズ:</label>
-                <input
-                  type="text"
-                  value={uploadConfig.adaptive_chunk_size ? '有効' : '無効'}
-                  disabled
-                  className="readonly-input"
-                />
-              </div>
-
-              <div className="config-group">
-                <label>リトライ回数:</label>
-                <input
-                  type="text"
-                  value={uploadConfig.retry_attempts}
-                  disabled
-                  className="readonly-input"
-                />
-              </div>
-
-              <div className="config-group">
-                <label>再開機能:</label>
-                <input
-                  type="text"
-                  value={uploadConfig.enable_resume ? '有効' : '無効'}
-                  disabled
-                  className="readonly-input"
-                />
-              </div>
-            </>
-          )}
-
-          <div className="config-group">
-            <label>アップロードキュー:</label>
-            <input
-              type="text"
-              value={`${uploadQueue.length}個のファイル`}
-              disabled
-              className="readonly-input"
-            />
-          </div>
-
-          <div className="config-group">
-            <label>アップロード状態:</label>
-            <input
-              type="text"
-              value={isUploading ? 'アップロード中' : '停止中'}
-              disabled
-              className="readonly-input"
-            />
-          </div>
-
-          <div className="config-group">
-            <label>AWS認証情報:</label>
-            <input
-              type="text"
-              value={awsCredentials ? 'あり' : 'なし'}
-              disabled
-              className="readonly-input"
-            />
-          </div>
-
-          <div className="config-group">
-            <label>バケット名:</label>
-            <input
-              type="text"
-              value={bucketName || '未設定'}
-              disabled
-              className="readonly-input"
-            />
-          </div>
-        </div>
-      )}
-
-      {error && (
-        <div className="upload-error">
-          <span className="error-icon">⚠️</span>
-          <span>{error}</span>
-          <button onClick={() => setError(null)} className="error-close">×</button>
-        </div>
-      )}
-
-      {/* ファイル選択エリア */}
-      <div 
-        className={`upload-drop-zone ${isDragOver ? 'drag-over' : ''}`}
-        onDragEnter={handleDragEnter}
-        onDragLeave={handleDragLeave}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
-        onClick={handleFileDialogOpen}
-      >
-        <div className="drop-zone-content">
-          <div className="upload-icon">📁</div>
-          <div className="drop-zone-text">
-            <p>ファイルをドラッグ&ドロップ または クリックして選択</p>
-            <p className="drop-zone-subtext">
-              対応形式: 全ファイル形式 | 最大: {FREE_TIER_LIMITS.MAX_FILE_SIZE_GB}GB/ファイル
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* 選択されたファイル情報 */}
-      {selectedFiles && (
-        <div className="selected-files-info">
-          <h3>選択されたファイル</h3>
-          <div className="file-stats">
-            <span>📊 {selectedFiles.file_count}個のファイル</span>
-            <span>💾 合計サイズ: {formatFileSize(selectedFiles.total_size)}</span>
-          </div>
-        </div>
-      )}
-
-      {/* アップロードコントロール */}
-      {(uploadQueue.length > 0 || (selectedFiles && selectedFiles.file_count > 0)) && (
-        <div className="upload-controls">
-          <div className="control-buttons">
-            {!isUploading ? (
-              <button 
-                onClick={() => {
-                  console.log('🚀 アップロード開始ボタンがクリックされました');
-                  console.log('📋 現在の状態:', {
-                    uploadConfig: uploadConfig ? 'あり' : 'なし',
-                    uploadQueue: uploadQueue.length,
-                    selectedFiles: selectedFiles ? selectedFiles.file_count : 0,
-                    awsCredentials: awsCredentials ? 'あり' : 'なし',
-                    bucketName: bucketName || 'なし'
-                  });
-                  handleStartUpload();
-                }}
-                className="btn-primary"
-                disabled={!uploadConfig}
-                title={!uploadConfig ? 'AWS設定が完了していません' : 'アップロードを開始'}
-              >
-                🚀 アップロード開始 {!uploadConfig && '(設定待ち)'}
-              </button>
-            ) : (
-              <button 
-                onClick={handleStopUpload}
-                className="btn-secondary"
-              >
-                ⏸️ 停止
-              </button>
-            )}
-            <button 
-              onClick={handleClearQueue}
-              className="btn-danger"
-              disabled={isUploading}
-            >
-              🗑️ キューをクリア
+      {/* メインアップロードエリア */}
+      <div className="upload-area">
+        <div className="upload-header">
+          <h3>📁 ファイルアップロード</h3>
+          <div className="upload-controls">
+            <button onClick={() => setShowSettings(true)} className="btn-secondary">
+              ⚙️ 設定
             </button>
           </div>
-
-          {/* 全体進捗 */}
-          {uploadQueue.length > 0 && (() => {
-            const realTimeStats = getRealTimeStats();
-            const overallProgress = getOverallProgress(); // 一度だけ計算して両方で使用
-            
-            console.log(`🎨 レンダリング時の全体進捗: ${overallProgress}%`);
-            console.log(`🎨 uploadQueue.length: ${uploadQueue.length}`);
-            console.log(`🎨 realTimeStats:`, realTimeStats);
-            
-            return (
-              <div className="overall-progress">
-                <div className="progress-header">
-                  <span>全体進捗: {overallProgress}%</span>
-                  <div className="progress-details">
-                    <span>📊 {formatFileSize(realTimeStats?.uploadedBytes || 0)} / {formatFileSize(realTimeStats?.totalBytes || 0)}</span>
-                    <span>📁 {getFileProgress().completed}/{getFileProgress().total} ファイル完了</span>
-                  </div>
-                </div>
-                <div className="progress-bar">
-                  <div 
-                    className="progress-fill"
-                    style={{ width: `${overallProgress}%` }}
-                  />
-                </div>
-                {realTimeStats && realTimeStats.totalSpeed > 0 && (
-                  <div className="upload-speed">
-                    ⚡ {realTimeStats.totalSpeed.toFixed(2)} MB/s (合計)
-                    <span> | アクティブ: {realTimeStats.activeUploads}ファイル</span>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
         </div>
-      )}
 
-      {/* アップロードキュー */}
-      {uploadQueue.length > 0 && (
-        <div className="upload-queue">
-          <h3>アップロードキュー</h3>
-          <div className="queue-items">
-            {uploadQueue.map((item) => (
-              <div key={item.id} data-item-id={item.id} className={`queue-item status-${item.status.toLowerCase()}`}>
-                <div className="item-info">
-                  <div className="item-name">{item.file_name}</div>
-                  <div className="item-details">
-                    <span>{formatFileSize(item.file_size)}</span>
-                    <span className={`status-badge status-${item.status.toLowerCase()}`}>
-                      {item.status === UploadStatus.Pending && '⏳ 待機中'}
-                      {item.status === UploadStatus.InProgress && '🔄 アップロード中'}
-                      {item.status === UploadStatus.Completed && '✅ 完了'}
-                      {item.status === UploadStatus.Failed && '❌ 失敗'}
-                      {item.status === UploadStatus.Paused && '⏸️ 一時停止'}
-                      {item.status === UploadStatus.Cancelled && '🚫 キャンセル'}
-                    </span>
-                  </div>
-                </div>
-
-                {(item.status === UploadStatus.InProgress || item.status === UploadStatus.Completed) && (
-                  <div className="item-progress">
-                    <div className="progress-header-compact">
-                      <span className="progress-text">{item.progress.toFixed(1)}%</span>
-                      <span className="progress-bytes">
-                        {formatFileSize(item.uploaded_bytes)} / {formatFileSize(item.file_size)}
-                      </span>
-                      <span className="upload-speed">⚡ {item.speed_mbps.toFixed(2)} MB/s</span>
-                      {item.status === UploadStatus.InProgress && item.eta_seconds && item.eta_seconds > 0 && (
-                        <span className="eta-time">⏱️ 残り {Math.round(item.eta_seconds)}秒</span>
-                      )}
-                      {item.status === UploadStatus.Completed && (
-                        <span className="completed-status">🎉 完了!</span>
-                      )}
-                    </div>
-                    <div className="progress-bar">
-                      <div 
-                        className="progress-fill"
-                        style={{ 
-                          width: `${Math.max(0, Math.min(100, item.progress))}%`,
-                          backgroundColor: item.status === UploadStatus.Completed ? '#22c55e' : '#3b82f6'
-                        }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {item.status === UploadStatus.Failed && (
-                  <div className="item-error">
-                    <div className="error-message">{item.error_message}</div>
-                    <button 
-                      onClick={() => handleRetryItem(item.id)}
-                      className="btn-retry"
-                    >
-                      🔄 再試行
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-
-
-      {/* 🎯 設定パネル（モーダル） */}
-      {showSettings && (
-        <>
-          <div className="settings-overlay" onClick={() => setShowSettings(false)} />
-          <div className="settings-panel">
-            <div className="settings-header">
-              <h4>⚙️ アップロード設定</h4>
-              <button className="btn-close" onClick={() => setShowSettings(false)}>×</button>
-            </div>
+        {/* ファイル選択エリア */}
+        <div className="file-selection-area">
+          <button onClick={handleFileSelect} className="btn-primary" disabled={isUploading}>
+            📂 ファイルを選択
+          </button>
           
-          <div className="settings-content">
-            {/* ティア選択 */}
-            <div className="setting-group">
-              <label>機能ティア</label>
-              <div className="tier-selector">
-                <button 
-                  className={`tier-btn ${currentTier === 'Free' ? 'active' : ''}`}
-                  onClick={() => handleTierChange('Free')}
-                >
-                  🆓 無料版
-                </button>
-                <button 
-                  className={`tier-btn ${currentTier === 'Premium' ? 'active' : ''}`}
-                  onClick={() => handleTierChange('Premium')}
-                >
-                  💎 プレミアム版
-                </button>
-              </div>
-            </div>
-
-            {/* 設定詳細 */}
-            {tempConfig && (
-              <div className="settings-details">
-                <div className="settings-table">
-                  <div className="settings-table-header">
-                    <div className="settings-table-header-row">
-                      <div className="settings-table-header-cell">設定項目</div>
-                      <div className="settings-table-header-cell">設定値</div>
-                      <div className="settings-table-header-cell">説明</div>
-                    </div>
-                  </div>
-                  
-                  <div className="settings-table-body">
-                    <div className="setting-row">
-                      <div className="setting-cell" data-label="設定項目">
-                        <span className="setting-label">同時アップロード数</span>
-                      </div>
-                      <div className="setting-cell" data-label="設定値">
-                        <div className="setting-input-container">
-                          <input 
-                            type="number" 
-                            min="1" 
-                            max={currentTier === 'Free' ? 1 : 8}
-                            value={tempConfig.max_concurrent_uploads || 1}
-                            onChange={(e) => setTempConfig({
-                              ...tempConfig, 
-                              max_concurrent_uploads: parseInt(e.target.value)
-                            })}
-                            disabled={currentTier === 'Free'}
-                          />
-                        </div>
-                      </div>
-                      <div className="setting-cell" data-label="説明">
-                        <span className="setting-description">
-                          {currentTier === 'Free' ? '無料版: 1固定' : 'プレミアム版: 1-8ファイル同時処理'}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="setting-row">
-                      <div className="setting-cell" data-label="設定項目">
-                        <span className="setting-label">チャンク並列数</span>
-                      </div>
-                      <div className="setting-cell" data-label="設定値">
-                        <div className="setting-input-container">
-                          <input 
-                            type="number" 
-                            min={currentTier === 'Free' ? 1 : 4} 
-                            max={currentTier === 'Free' ? 1 : 16}
-                            value={tempConfig.max_concurrent_parts || 1}
-                            onChange={(e) => setTempConfig({
-                              ...tempConfig, 
-                              max_concurrent_parts: parseInt(e.target.value)
-                            })}
-                            disabled={currentTier === 'Free'}
-                          />
-                        </div>
-                      </div>
-                      <div className="setting-cell" data-label="説明">
-                        <span className="setting-description">
-                          {currentTier === 'Free' ? '無料版: 1固定（順次処理）' : 'プレミアム版: 4-16チャンク並列処理'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* チャンクサイズ設定 - 動的チャンクサイズが無効の場合のみ表示 */}
-                    {(!tempConfig.adaptive_chunk_size || currentTier === 'Free') && (
-                      <div className="setting-row">
-                        <div className="setting-cell" data-label="設定項目">
-                          <span className="setting-label">チャンクサイズ (MB)</span>
-                        </div>
-                        <div className="setting-cell" data-label="設定値">
-                          <div className="setting-input-container">
-                            <input 
-                              type="number" 
-                              min={tempConfig.min_chunk_size_mb || 5} 
-                              max={tempConfig.max_chunk_size_mb || 1024}
-                              value={tempConfig.chunk_size_mb || 5}
-                              onChange={(e) => setTempConfig({
-                                ...tempConfig, 
-                                chunk_size_mb: parseInt(e.target.value)
-                              })}
-                              disabled={currentTier === 'Free'}
-                            />
-                          </div>
-                        </div>
-                        <div className="setting-cell" data-label="説明">
-                          <span className="setting-description">
-                            {currentTier === 'Free' ? '無料版: 5MB固定' : `プレミアム版: 5-1024MB可変`}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="setting-row">
-                      <div className="setting-cell" data-label="設定項目">
-                        <span className="setting-label">動的チャンクサイズ</span>
-                      </div>
-                      <div className="setting-cell" data-label="設定値">
-                        <div className="setting-input-container">
-                          <label className="toggle-switch">
-                            <input 
-                              type="checkbox" 
-                              checked={tempConfig.adaptive_chunk_size || false}
-                              onChange={(e) => setTempConfig({
-                                ...tempConfig, 
-                                adaptive_chunk_size: e.target.checked
-                              })}
-                              disabled={currentTier === 'Free'}
-                            />
-                            <span className="toggle-slider"></span>
-                          </label>
-                          <span className="toggle-label">{tempConfig.adaptive_chunk_size ? '有効' : '無効'}</span>
-                        </div>
-                      </div>
-                      <div className="setting-cell" data-label="説明">
-                        <span className="setting-description">
-                          {currentTier === 'Free' ? '無料版: 無効' : 'プレミアム版: ファイルサイズに応じて自動調整'}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="setting-row">
-                      <div className="setting-cell" data-label="設定項目">
-                        <span className="setting-label">再開機能</span>
-                      </div>
-                      <div className="setting-cell" data-label="設定値">
-                        <div className="setting-input-container">
-                          <label className="toggle-switch">
-                            <input 
-                              type="checkbox" 
-                              checked={false}
-                              onChange={() => {}} // 操作無効
-                              disabled={true} // 常に無効
-                            />
-                            <span className="toggle-slider"></span>
-                          </label>
-                          <span className="toggle-label">無効</span>
-                        </div>
-                      </div>
-                      <div className="setting-cell" data-label="説明">
-                        <span className="setting-description">
-                          🚧 未実装機能（将来のアップデートで対応予定）
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="setting-row">
-                      <div className="setting-cell" data-label="設定項目">
-                        <span className="setting-label">リトライ回数</span>
-                      </div>
-                      <div className="setting-cell" data-label="設定値">
-                        <div className="setting-input-container">
-                          <input 
-                            type="number" 
-                            min="1" 
-                            max="20"
-                            value={tempConfig.retry_attempts || 3}
-                            onChange={(e) => setTempConfig({
-                              ...tempConfig, 
-                              retry_attempts: parseInt(e.target.value)
-                            })}
-                          />
-                        </div>
-                      </div>
-                      <div className="setting-cell" data-label="説明">
-                        <span className="setting-description">
-                          失敗時の再試行回数（全ティア共通）
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* 制限情報 */}
-            <div className="tier-limits">
-              <h5>{currentTier === 'Free' ? '🆓 無料版制限' : '💎 プレミアム版制限'}</h5>
+          {selectedFiles && (
+            <div className="selected-files">
+              <h4>選択されたファイル ({selectedFiles.file_count}個)</h4>
+              <p>合計サイズ: {formatBytes(selectedFiles.total_size)}</p>
               <ul>
-                <li>最大ファイルサイズ: {currentTier === 'Free' ? FREE_TIER_LIMITS.MAX_FILE_SIZE_GB : PREMIUM_TIER_LIMITS.MAX_FILE_SIZE_GB}GB</li>
-                <li>同時アップロード: {currentTier === 'Free' ? FREE_TIER_LIMITS.MAX_CONCURRENT_UPLOADS : PREMIUM_TIER_LIMITS.MAX_CONCURRENT_UPLOADS}ファイル</li>
-                <li>チャンク並列度: {currentTier === 'Free' ? FREE_TIER_LIMITS.MAX_CONCURRENT_PARTS : PREMIUM_TIER_LIMITS.MAX_CONCURRENT_PARTS}</li>
-                <li>高速化機能: {currentTier === 'Free' ? '無し' : '有り（動的最適化、並列処理）'}</li>
+                {selectedFiles.selected_files.slice(0, 5).map((file, index) => (
+                  <li key={index}>{file}</li>
+                ))}
+                {selectedFiles.selected_files.length > 5 && (
+                  <li>... 他 {selectedFiles.selected_files.length - 5}個</li>
+                )}
               </ul>
             </div>
+          )}
+        </div>
 
-            {/* 設定ボタン */}
-            <div className="settings-actions">
-              <button className="btn-primary" onClick={applySettings}>
-                ✅ 設定を適用
+        {/* アップロード制御 */}
+        {selectedFiles && (
+          <div className="upload-controls">
+            <button 
+              onClick={handleStartUpload} 
+              disabled={isUploading || !uploadConfig} 
+              className="btn-primary"
+            >
+              {isUploading ? '🔄 アップロード中...' : '🚀 アップロード開始'}
+            </button>
+            
+            {isUploading && (
+              <button onClick={handleStopUpload} className="btn-secondary">
+                ⏹️ 停止
               </button>
-              <button className="btn-secondary" onClick={resetSettings}>
-                🔄 リセット
+            )}
+          </div>
+        )}
+
+        {/* アップロードキュー */}
+        {uploadQueue.length > 0 && (
+          <div className="upload-queue">
+            <h4>アップロードキュー ({uploadQueue.length}個)</h4>
+            <div className="queue-controls">
+              <button onClick={handleClearQueue} className="btn-secondary">
+                🗑️ キューをクリア
               </button>
+            </div>
+            <div className="queue-items">
+              {uploadQueue.map((item) => (
+                <div key={item.id} className={`queue-item ${item.status.toLowerCase()}`}>
+                  <div className="item-info">
+                    <span className="item-name">{item.file_path.split('/').pop()}</span>
+                    <span className="item-status">{item.status}</span>
+                  </div>
+                  {item.status === UploadStatus.InProgress && (
+                    <div className="progress-bar">
+                      <div 
+                        className="progress-fill" 
+                        style={{ width: `${item.progress}%` }}
+                      ></div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 🎯 設定パネル（モーダル） */}
+      {showSettings && tempConfig && (
+        <div className="settings-modal">
+          <div className="settings-content">
+            <div className="settings-header">
+              <h3>⚙️ アップロード設定</h3>
+              <button onClick={() => setShowSettings(false)} className="close-btn">×</button>
+            </div>
+
+            <div className="settings-body">
+              {/* 基本情報 */}
+              <div className="settings-section">
+                <h4>📊 基本情報</h4>
+                <div className="setting-row">
+                  <div className="setting-cell" data-label="認証情報">
+                    <input
+                      type="text"
+                      value={config.aws_settings.default_region ? 'あり' : 'なし'}
+                      disabled
+                      className="readonly-input"
+                    />
+                  </div>
+                  <div className="setting-cell" data-label="バケット名">
+                    <input
+                      type="text"
+                      value={config.user_preferences.default_bucket_name || '未設定'}
+                      disabled
+                      className="readonly-input"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 機能ティア選択 */}
+              <div className="settings-section">
+                <h4>🎯 機能ティア</h4>
+                <div className="tier-selection">
+                  <label className="tier-option">
+                    <input
+                      type="radio"
+                      name="tier"
+                      value="Free"
+                      checked={currentTier === 'Free'}
+                      onChange={(e) => handleTierChange(e.target.value as 'Free' | 'Premium')}
+                    />
+                    <span className="tier-label">🆓 無料版</span>
+                    <span className="tier-description">
+                      1ファイルずつ、5MBチャンク、再開機能なし
+                    </span>
+                  </label>
+                  
+                  <label className="tier-option">
+                    <input
+                      type="radio"
+                      name="tier"
+                      value="Premium"
+                      checked={currentTier === 'Premium'}
+                      onChange={(e) => handleTierChange(e.target.value as 'Free' | 'Premium')}
+                    />
+                    <span className="tier-label">💎 プレミアム版</span>
+                    <span className="tier-description">
+                      8ファイル同時、動的チャンク、再開機能あり
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              {/* 詳細設定 */}
+              <div className="settings-section">
+                <h4>🔧 詳細設定</h4>
+                <div className="setting-row">
+                  <div className="setting-cell">
+                    <label htmlFor="concurrent-uploads-input" className="setting-label-complex">
+                      <span>同時アップロード数</span>
+                      <span className="setting-description-inline">
+                        ({currentTier === 'Free' 
+                          ? `無料版: ${FREE_TIER_LIMITS.MAX_CONCURRENT_UPLOADS}個に固定` 
+                          : '設定範囲: 1～20個'})
+                      </span>
+                    </label>
+                    <input
+                      id="concurrent-uploads-input"
+                      type="number"
+                      min="1"
+                      max="20"
+                      value={tempConfig.max_concurrent_uploads || 1}
+                      disabled={currentTier === 'Free'}
+                      onChange={(e) => setTempConfig({
+                        ...tempConfig, 
+                        max_concurrent_uploads: parseInt(e.target.value)
+                      })}
+                    />
+                  </div>
+                  <div className="setting-cell">
+                    <label className="setting-label-complex">
+                      <span>再開機能</span>
+                    </label>
+                    <div className="toggle-control">
+                      <label className="toggle-switch">
+                        <input 
+                          type="checkbox" 
+                          checked={tempConfig.enable_resume || false}
+                          onChange={(e) => setTempConfig({
+                            ...tempConfig, 
+                            enable_resume: e.target.checked
+                          })}
+                          disabled={currentTier === 'Free'}
+                        />
+                        <span className="toggle-slider"></span>
+                      </label>
+                      <span className="toggle-label">{tempConfig.enable_resume ? '有効' : '無効'}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="setting-row">
+                  <div className="setting-cell">
+                    <label htmlFor="chunk-size-input" className="setting-label-complex">
+                      <span>チャンクサイズ</span>
+                      <span className="setting-description-inline">
+                        ({currentTier === 'Free'
+                          ? `無料版: ${FREE_TIER_LIMITS.CHUNK_SIZE_MB}MBに固定`
+                          : tempConfig.adaptive_chunk_size
+                            ? '動的チャンクサイズが有効'
+                            : '設定範囲: 5～1024MB'})
+                      </span>
+                    </label>
+                    <input
+                      id="chunk-size-input"
+                      type="number"
+                      min="5"
+                      max="1024"
+                      value={tempConfig.chunk_size_mb || 5}
+                      disabled={currentTier === 'Free' || tempConfig.adaptive_chunk_size}
+                      onChange={(e) => setTempConfig({
+                        ...tempConfig, 
+                        chunk_size_mb: parseInt(e.target.value)
+                      })}
+                    />
+                  </div>
+                  <div className="setting-cell">
+                    <label className="setting-label-complex">
+                      <span>動的チャンクサイズ</span>
+                    </label>
+                    <div className="toggle-control">
+                      <label className="toggle-switch">
+                        <input 
+                          type="checkbox" 
+                          checked={tempConfig.adaptive_chunk_size || false}
+                          onChange={(e) => setTempConfig({
+                            ...tempConfig, 
+                            adaptive_chunk_size: e.target.checked
+                          })}
+                          disabled={currentTier === 'Free'}
+                        />
+                        <span className="toggle-slider"></span>
+                      </label>
+                      <span className="toggle-label">{tempConfig.adaptive_chunk_size ? '有効' : '無効'}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="slider-setting">
+                  <label className="setting-label-complex">
+                    <span>再試行回数</span>
+                    <span className="setting-description-inline">
+                      (アップロード失敗時の再試行回数を設定します)
+                    </span>
+                  </label>
+                  <div className="slider-container">
+                    <input
+                      type="range"
+                      min="1" 
+                      max="20"
+                      value={tempConfig.retry_attempts || 3}
+                      onChange={(e) => setTempConfig({
+                        ...tempConfig, 
+                        retry_attempts: parseInt(e.target.value)
+                      })}
+                    />
+                    <span className="setting-value">{tempConfig.retry_attempts || 3}回</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="settings-footer">
+                <button onClick={applySettings} className="btn-primary">
+                  ✅ 設定を適用
+                </button>
+                <button onClick={() => setShowSettings(false)} className="btn-secondary">
+                  ❌ キャンセル
+                </button>
+              </div>
             </div>
           </div>
         </div>
-        </>
       )}
-
-      {/* ネイティブファイルダイアログを使用するため、HTML input要素は不要 */}
     </div>
   );
 }; 

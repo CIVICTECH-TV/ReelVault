@@ -1,0 +1,147 @@
+/* AuthManager - 統一デザイン */
+
+.auth-manager-wrapper .card {
+  padding: 2rem;
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  margin-bottom: 2rem;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-primary);
+}
+
+.auth-manager-wrapper .card h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 1.5rem;
+  color: var(--text-primary);
+  margin-top: 0;
+  margin-bottom: 2rem;
+  border-bottom: 2px solid var(--accent-primary);
+  padding-bottom: 1rem;
+}
+
+.auth-manager-wrapper .card .icon {
+  font-size: 1.8rem;
+}
+
+.auth-manager-wrapper .setup-instructions {
+  list-style: decimal inside;
+  padding-left: 0;
+  color: var(--text-secondary);
+}
+.auth-manager-wrapper .setup-instructions li {
+  margin-bottom: 0.75rem;
+}
+
+.auth-manager-wrapper .link-button {
+  background: none;
+  border: none;
+  color: var(--accent-secondary);
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  font-size: inherit;
+}
+
+.auth-manager-wrapper .form-group {
+  margin-bottom: 1.5rem;
+  display: flex;
+  align-items: center;
+}
+
+.auth-manager-wrapper .form-group label {
+  flex: 0 0 180px;
+  text-align: right;
+  padding-right: 1rem;
+  font-weight: bold;
+  color: var(--text-secondary);
+}
+
+.auth-manager-wrapper .form-group input,
+.auth-manager-wrapper .form-group select {
+  flex: 1;
+  background: var(--bg-tertiary);
+  border: 2px solid var(--border-secondary);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 8px 12px;
+  transition: border-color 0.3s ease;
+}
+
+.auth-manager-wrapper .form-group input:focus,
+.auth-manager-wrapper .form-group select:focus {
+  border-color: var(--accent-primary);
+  outline: none;
+}
+
+.auth-manager-wrapper .description {
+  margin-left: 1rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.auth-manager-wrapper .btn-primary {
+  margin-left: 190px; /* ラベルの幅 + gap */
+}
+
+/* Status Card */
+.status-card {
+  padding: 1rem 1.5rem;
+  border-radius: 8px;
+  margin-top: 1rem;
+  border: 1px solid transparent;
+}
+
+.status-card p {
+  color: #ffffff;
+  margin: 0;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.status-card p strong {
+  color: #ffffff;
+}
+
+.status-divider {
+  margin: 0 0.75rem;
+  opacity: 0.6;
+}
+
+.status-card.success {
+  background: #4CAF50;
+  border-color: #66bb6a;
+}
+
+.status-card.warning {
+  background: #ff9800;
+  border-color: #ffb74d;
+}
+
+.status-card.error {
+  background: #f44336;
+  border-color: #ef5350;
+}
+
+/* Auth Result */
+.auth-result {
+  margin-left: 190px;
+  margin-top: 1rem;
+}
+
+.auth-result p {
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  margin: 0;
+}
+.auth-result.success p {
+  background: var(--accent-primary);
+  color: var(--text-primary);
+}
+.auth-result.error p {
+  background: var(--accent-error);
+  color: var(--text-primary);
+}
